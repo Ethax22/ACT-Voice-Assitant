@@ -1,0 +1,35 @@
+{
+  "type": "Settings",
+  "audio": {
+    "input": { "encoding": "linear16", "sample_rate": 16000 },
+    "output": { "encoding": "linear16", "sample_rate": 24000, "container": "none" }
+  },
+  "agent": {
+    "listen": {
+      "provider": {
+        "type": "deepgram",
+        "model": "flux-general-en",
+        "version": "v2"
+      }
+    },
+    "think": {
+      "provider": {
+        "type": "open_ai",
+        "model": "act-ai"
+      },
+      "endpoint": {
+        "url": "https://your-rag-backend.example.com/v1/chat/completions",
+        "headers": { "Authorization": "Bearer YOUR_BACKEND_AUTH_KEY" }
+      },
+      "prompt": "You are ACT AI, the voice assistant for Agni College of Technology. Talk like a helpful senior student showing someone around campus: warm, direct, and brief. Keep answers short since this is a spoken conversation."
+    },
+    "speak": {
+      "provider": {
+        "type": "deepgram",
+        "model": "flux-hannah-en",
+        "version": "v2"
+      }
+    },
+    "greeting": "Hi! I'm ACT AI. Ask me about admissions, courses, placements, or campus life at Agni College of Technology."
+  }
+}

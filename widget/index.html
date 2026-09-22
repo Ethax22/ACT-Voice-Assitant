@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agni College of Technology</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #0B1E3D;
+    --royal: #1E4D8C;
+    --gold: #D9A441;
+    --off-white: #F7F8FA;
+    --slate: #5B6472;
+    --white: #FFFFFF;
+    --card-shadow: 0 20px 50px rgba(11, 30, 61, 0.18);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--off-white);
+    color: var(--navy);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ---------- Hero (the one-page site) ---------- */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 40px 24px;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(217,164,65,0.10), transparent 45%),
+      radial-gradient(circle at 85% 80%, rgba(30,77,140,0.12), transparent 50%),
+      var(--off-white);
+    position: relative;
+  }
+
+  .wordmark {
+    position: absolute;
+    top: 28px;
+    left: 32px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Lora', serif;
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--navy);
+  }
+
+  .wordmark .mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--navy);
+  }
+
+  .hero h1 {
+    font-family: 'Lora', serif;
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 600;
+    color: var(--navy);
+    max-width: 780px;
+    line-height: 1.15;
+  }
+
+  .hero p {
+    margin-top: 20px;
+    font-size: 17px;
+    color: var(--slate);
+    max-width: 520px;
+    line-height: 1.6;
+  }
+
+  .hero-hint {
+    margin-top: 44px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--royal);
+    font-weight: 500;
+  }
+
+  .hero-hint svg { width: 18px; height: 18px; }
+
+  /* ---------- Floating launcher ---------- */
+  .launcher {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, var(--royal), var(--navy));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 12px 28px rgba(11,30,61,0.35);
+    border: none;
+    z-index: 40;
+    transition: transform 0.25s ease;
+  }
+  .launcher:hover { transform: scale(1.06); }
+  .launcher svg { width: 26px; height: 26px; fill: var(--white); }
+
+  .launcher::before {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid rgba(30,77,140,0.35);
+    animation: pulse-ring 2.4s ease-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%   { transform: scale(0.9); opacity: 0.8; }
+    80%  { transform: scale(1.25); opacity: 0; }
+    100% { transform: scale(1.25); opacity: 0; }
+  }
+
+  /* ---------- Widget panel ---------- */
+  .widget {
+    position: fixed;
+    bottom: 104px;
+    right: 28px;
+    width: 336px;
+    max-width: calc(100vw - 40px);
+    background: var(--white);
+    border-radius: 22px;
+    box-shadow: var(--card-shadow);
+    overflow: hidden;
+    z-index: 50;
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+    pointer-events: none;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+  }
+
+  .widget.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  .widget-header {
+    background: var(--navy);
+    color: var(--white);
+    padding: 18px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .lang-toggle {
+    display: flex;
+    background: rgba(255,255,255,0.12);
+    border-radius: 999px;
+    padding: 2px;
+  }
+  .lang-btn {
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.75);
+    font-family: 'Inter', sans-serif;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .lang-btn.active {
+    background: var(--gold);
+    color: var(--navy);
+  }
+
+  .widget-header .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .brand-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Lora', serif;
+    font-weight: 700;
+    color: var(--navy);
+    font-size: 14px;
+  }
+
+  .widget-header h2 {
+    font-family: 'Lora', serif;
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .collapse-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    opacity: 0.75;
+  }
+  .collapse-btn:hover { opacity: 1; }
+  .collapse-btn svg { width: 16px; height: 16px; stroke: var(--white); }
+
+  .widget-body {
+    padding: 20px;
+  }
+
+  .widget-body .prompt {
+    font-size: 13.5px;
+    color: var(--slate);
+    margin-bottom: 16px;
+  }
+
+  .topic-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .topic-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 6px 6px 10px;
+    border-radius: 14px;
+    background: var(--off-white);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    flex: 0 0 calc(50% - 5px);
+    width: calc(50% - 5px);
+    overflow: hidden;
+  }
+
+  .topic-card:hover {
+    border-color: var(--royal);
+    background: #EEF3FA;
+  }
+
+  .topic-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .topic-icon svg { width: 20px; height: 20px; }
+
+  .topic-avatar {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 10px;
+    object-fit: cover;
+    object-position: top center;
+    border: 2px solid transparent;
+    margin-bottom: 8px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  /* Set on the tile matching whichever category the last reply was about
+     (topic-card click, or keyword match against the reply text — see
+     classifyCategory/setActiveTopic in the script below). A steady gold
+     ring, distinct from the animated "speaking" glow below. */
+  .topic-card.active .topic-avatar {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 4px rgba(217, 164, 65, 0.22);
+  }
+
+  /* Set only while audio is actively playing for the active tile (voice
+     path) or briefly after a typed reply lands — an animated pulse so the
+     "who's talking" cue reads as live, not just a static highlight. */
+  .topic-card.speaking .topic-avatar {
+    border-color: var(--royal);
+    animation: act-avatar-pulse 1.1s ease-in-out infinite;
+  }
+
+  @keyframes act-avatar-pulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(30, 77, 140, 0.20), 0 0 8px rgba(30, 77, 140, 0.25); }
+    50% { box-shadow: 0 0 0 7px rgba(30, 77, 140, 0.32), 0 0 20px rgba(30, 77, 140, 0.55); }
+  }
+
+  .topic-card span {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--navy);
+    text-align: center;
+  }
+
+  .talk-btn {
+    margin-top: 18px;
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 14px;
+    background: linear-gradient(120deg, var(--royal), var(--navy));
+    color: var(--white);
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+
+  .talk-btn:hover { opacity: 0.92; }
+  .talk-btn svg { width: 18px; height: 18px; fill: var(--white); }
+
+  .status-line {
+    margin-top: 12px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--slate);
+    min-height: 16px;
+  }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 16px 0 12px;
+    color: var(--slate);
+    font-size: 12px;
+  }
+  .divider::before, .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #E5E8EE;
+  }
+
+  .chat-log {
+    max-height: 140px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .chat-log:empty { display: none; }
+
+  .chat-bubble {
+    max-width: 85%;
+    padding: 9px 13px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .chat-bubble.user {
+    align-self: flex-end;
+    background: var(--royal);
+    color: var(--white);
+    border-bottom-right-radius: 4px;
+  }
+  .chat-bubble.assistant {
+    align-self: flex-start;
+    background: var(--off-white);
+    color: var(--navy);
+    border-bottom-left-radius: 4px;
+  }
+
+  .chat-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .chat-row input {
+    flex: 1;
+    border: 1px solid #E5E8EE;
+    border-radius: 12px;
+    padding: 11px 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px;
+    color: var(--navy);
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .chat-row input:focus { border-color: var(--royal); }
+
+  .send-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    border: none;
+    background: var(--navy);
+    color: var(--white);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .send-btn svg { width: 17px; height: 17px; }
+  .send-btn:hover { background: var(--royal); }
+  .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  @media (max-width: 420px) {
+    .widget { right: 16px; bottom: 96px; }
+    .launcher { right: 16px; }
+  }
+</style>
+</head>
+<body>
+
+  <section class="hero">
+    <div class="wordmark"><span class="mark">A</span>Agni College of Technology</div>
+    <h1>Everything about ACT, one conversation away.</h1>
+    <p>Ask about admissions, courses, placements, or campus life — in English or Tamil — and get answers straight from the college, any time.</p>
+    <div class="hero-hint">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      <span>Try ACT AI in the corner</span>
+    </div>
+  </section>
+
+  <!-- Floating launcher button -->
+  <button class="launcher" id="launcherBtn" aria-label="Open ACT AI">
+    <svg viewBox="0 0 24 24"><path d="M12 3C7.03 3 3 6.58 3 11c0 2.39 1.19 4.53 3.06 6.02-.1.98-.5 2.28-1.5 3.48 1.7-.16 3.24-.86 4.4-1.72.94.25 1.95.39 3.04.39 4.97 0 9-3.58 9-8s-4.03-8-9-8z"/></svg>
+  </button>
+
+  <!-- Widget panel -->
+  <div class="widget" id="widgetPanel">
+    <div class="widget-header">
+      <div class="brand">
+        <div class="brand-mark">A</div>
+        <h2>ACT AI</h2>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="lang-toggle" id="langToggle" role="group" aria-label="Choose language">
+          <button type="button" class="lang-btn active" data-lang="en">EN</button>
+          <button type="button" class="lang-btn" data-lang="ta">தமிழ்</button>
+        </div>
+        <button class="collapse-btn" id="collapseBtn" aria-label="Collapse">
+          <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+            <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="widget-body">
+      <div class="prompt" id="promptLabel">What would you like to know?</div>
+
+      <div class="topic-grid">
+        <div class="topic-card"
+             data-avatar="about-us"
+             data-topic-en="Tell me about ACT — what makes it a good college?"
+             data-topic-ta="ACT பற்றி சொல்லுங்கள் — இது ஏன் சிறந்த கல்லூரி?">
+          <img class="topic-avatar" src="assets/about-us-idle.png" alt="About Us">
+          <span data-label-en="About Us" data-label-ta="எங்களை பற்றி">About Us</span>
+        </div>
+
+        <div class="topic-card"
+             data-avatar="courses"
+             data-topic-en="What courses does ACT offer?"
+             data-topic-ta="ACT எந்த படிப்புகளை வழங்குகிறது?">
+          <img class="topic-avatar" src="assets/courses-idle.png" alt="Courses">
+          <span data-label-en="Courses" data-label-ta="படிப்புகள்">Courses</span>
+        </div>
+
+        <div class="topic-card"
+             data-avatar="admissions"
+             data-topic-en="How do I get admission into ACT?"
+             data-topic-ta="ACT-இல் சேர்க்கை பெறுவது எப்படி?">
+          <img class="topic-avatar" src="assets/admissions-idle.png" alt="Admissions">
+          <span data-label-en="Admissions" data-label-ta="சேர்க்கை">Admissions</span>
+        </div>
+
+        <div class="topic-card"
+             data-avatar="placements"
+             data-topic-en="Tell me about placements at ACT."
+             data-topic-ta="ACT-இல் வேலைவாய்ப்பு பற்றி சொல்லுங்கள்.">
+          <img class="topic-avatar" src="assets/placements-idle.png" alt="Placements">
+          <span data-label-en="Placements" data-label-ta="வேலைவாய்ப்பு">Placements</span>
+        </div>
+      </div>
+
+      <button class="talk-btn" id="talkBtn">
+        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+        <span id="talkBtnLabel">Let's Talk</span>
+      </button>
+
+      <div class="divider" id="dividerLabel"><span>or type your question</span></div>
+
+      <div class="chat-log" id="chatLog"></div>
+
+      <form class="chat-row" id="chatForm">
+        <input type="text" id="chatInput" placeholder="Ask about admissions, courses..." autocomplete="off">
+        <button type="submit" class="send-btn" id="sendBtn" aria-label="Send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </form>
+
+      <div class="status-line" id="statusLine"></div>
+    </div>
+  </div>
+
+<script>
+  const launcherBtn = document.getElementById('launcherBtn');
+  const widgetPanel = document.getElementById('widgetPanel');
+  const collapseBtn = document.getElementById('collapseBtn');
+  const talkBtn = document.getElementById('talkBtn');
+  const statusLine = document.getElementById('statusLine');
+  const topicCards = document.querySelectorAll('.topic-card');
+
+  // ---------------------------------------------------------------------
+  // Avatar tile highlighting — "active" (steady gold ring) tracks which
+  // category the conversation is currently about; "speaking" (animated
+  // pulse) tracks whether ACT AI is actively producing audio for it right
+  // now. Category is picked by simple keyword matching against the reply
+  // text rather than a backend field, since the voice path's reply travels
+  // through Deepgram's strict OpenAI-compatible SSE schema — main.py's
+  // _stream_reply_sse already documents that any non-standard field gets
+  // silently dropped by Deepgram, so this can't ride along as backend
+  // metadata without breaking voice. Matching client-side on text that's
+  // already available (the typed-chat JSON reply, or Deepgram's
+  // ConversationText relay message) works identically for both paths with
+  // no protocol changes.
+  // ---------------------------------------------------------------------
+  const AVATAR_KEYWORDS = {
+    'about-us': ['found', 'establish', 'accredit', 'naac', 'campus', 'history', 'autonomous', 'vision', 'mission', 'agni college', 'about act'],
+    // Deliberately NOT including degree-name abbreviations like "b.e",
+    // "b.tech", "m.e", "m.tech" here — confirmed live that they backfire.
+    // Any admissions answer that itemizes UG vs PG process naturally says
+    // "For B.E./B.Tech... For M.E./M.Tech...", racking up 4 courses-keyword
+    // hits just from naming which degree the admission process applies to,
+    // which beat admissions's own keyword count and made an admissions
+    // answer highlight as "courses" instead. Kept in sync with the
+    // identical fix in voice_agent.py's CATEGORY_KEYWORDS.
+    'courses': ['course', 'program', 'department', 'branch', 'curriculum', 'semester', 'syllabus'],
+    'admissions': ['admission', 'apply', 'application', 'counsel', 'entrance', 'eligib', 'fee', 'cutoff', 'seat', 'enroll'],
+    'placements': ['placement', 'recruit', 'company', 'companies', 'package', 'salary', 'intern', 'hire', 'hiring', 'offer', 'drive'],
+  };
+
+  function classifyCategory(text) {
+    if (!text) return null;
+    const lower = text.toLowerCase();
+    let bestKey = null;
+    let bestScore = 0;
+    for (const [key, keywords] of Object.entries(AVATAR_KEYWORDS)) {
+      // Match at a word boundary but allow any suffix (no trailing \b) —
+      // plain lower.includes(kw) let "mission" (about-us) silently match
+      // inside "admission"/"admissions", so About Us won every admissions
+      // question on a tie (checked first in AVATAR_KEYWORDS, and ties don't
+      // overwrite). A strict \bkw\b fixes the collision but breaks plurals
+      // ("admission" no longer matching "admissions"); boundary-before-only
+      // gets both: "mission" still can't start mid-word inside "admission",
+      // but "admission" still matches "admissions". Kept in sync with the
+      // identical fix in voice_agent.py's classify_category.
+      const score = keywords.reduce((count, kw) => {
+        const pattern = new RegExp('\\b' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        return count + (pattern.test(lower) ? 1 : 0);
+      }, 0);
+      if (score > bestScore) {
+        bestScore = score;
+        bestKey = key;
+      }
+    }
+    return bestKey;
+  }
+
+  function setActiveTopic(key) {
+    if (!key) return;
+    topicCards.forEach(card => {
+      card.classList.toggle('active', card.dataset.avatar === key);
+    });
+  }
+
+  function setSpeakingTopic(isSpeaking) {
+    topicCards.forEach(card => {
+      card.classList.toggle('speaking', isSpeaking && card.classList.contains('active'));
+    });
+  }
+
+  // Typed replies don't have a real "speaking duration" the way audio
+  // does — pulse briefly after the reply lands so the highlight still
+  // reads as a live response, then settle back to the steady active ring.
+  function pulseTopicBriefly(ms = 2200) {
+    setSpeakingTopic(true);
+    setTimeout(() => setSpeakingTopic(false), ms);
+  }
+
+  function openWidget() {
+    widgetPanel.classList.add('open');
+    launcherBtn.style.transform = 'scale(0)';
+  }
+  function closeWidget() {
+    widgetPanel.classList.remove('open');
+    launcherBtn.style.transform = 'scale(1)';
+  }
+
+  launcherBtn.addEventListener('click', openWidget);
+  collapseBtn.addEventListener('click', closeWidget);
+
+  // This posts to the RAG backend's public /widget/chat proxy (see
+  // rag-backend/main.py) — NOT /v1/chat/completions directly, since that
+  // route requires the backend's bearer auth key, which must never be
+  // present in browser JS. /widget/chat holds that key server-side and
+  // shares the exact same retrieval + persona logic.
+  const RAG_BACKEND_WIDGET_URL = 'http://localhost:8000/widget/chat';
+
+  const chatForm = document.getElementById('chatForm');
+  const chatInput = document.getElementById('chatInput');
+  const chatLog = document.getElementById('chatLog');
+  const sendBtn = document.getElementById('sendBtn');
+
+  // Language is explicitly picked by the visitor — no auto-detect (per the
+  // locked architecture decision). Drives both which starter prompts/labels
+  // show and which voice pipeline "Let's Talk" connects to.
+  let currentLanguage = 'en';
+
+  const UI_TEXT = {
+    en: {
+      prompt: 'What would you like to know?',
+      divider: 'or type your question',
+      placeholder: 'Ask about admissions, courses...',
+      talk: "Let's Talk",
+    },
+    ta: {
+      prompt: 'நீங்கள் எதை தெரிந்துகொள்ள விரும்புகிறீர்கள்?',
+      divider: 'அல்லது உங்கள் கேள்வியை தட்டச்சு செய்யவும்',
+      placeholder: 'சேர்க்கை, படிப்புகள் பற்றி கேளுங்கள்...',
+      talk: 'பேசலாம்',
+      connecting: 'இணைக்கிறது…',
+      endCall: 'அழைப்பை முடி',
+    },
+  };
+  UI_TEXT.en.connecting = 'Connecting…';
+  UI_TEXT.en.endCall = 'End Call';
+
+  const langToggle = document.getElementById('langToggle');
+  const promptLabel = document.getElementById('promptLabel');
+  const dividerLabelSpan = document.getElementById('dividerLabel').querySelector('span');
+  const talkBtnLabel = document.getElementById('talkBtnLabel');
+
+  function applyLanguage(lang) {
+    currentLanguage = lang;
+    const t = UI_TEXT[lang];
+    promptLabel.textContent = t.prompt;
+    dividerLabelSpan.textContent = t.divider;
+    chatInput.placeholder = t.placeholder;
+    if (!voiceActive) talkBtnLabel.textContent = t.talk;
+
+    langToggle.querySelectorAll('.lang-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.lang === lang);
+    });
+
+    topicCards.forEach((card) => {
+      const span = card.querySelector('span');
+      span.textContent = lang === 'en' ? span.dataset.labelEn : span.dataset.labelTa;
+    });
+  }
+
+  langToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.lang-btn');
+    if (!btn || btn.dataset.lang === currentLanguage) return;
+    if (voiceActive) stopVoiceSession(); // switching language mid-call would talk to the wrong pipeline
+    applyLanguage(btn.dataset.lang);
+  });
+
+  // Keep the full conversation here — sending only the latest message would
+  // make follow-ups like "what about ECE?" lose their context.
+  const conversationHistory = [];
+
+  function addBubble(text, role) {
+    const bubble = document.createElement('div');
+    bubble.className = `chat-bubble ${role}`;
+    bubble.textContent = text;
+    chatLog.appendChild(bubble);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  async function sendMessage(message) {
+    if (!message) return;
+
+    addBubble(message, 'user');
+    conversationHistory.push({ role: 'user', content: message });
+    statusLine.textContent = 'ACT AI is thinking...';
+    sendBtn.disabled = true;
+
+    try {
+      const res = await fetch(RAG_BACKEND_WIDGET_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: conversationHistory }),
+      });
+
+      if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+
+      const data = await res.json();
+      const reply = data.reply || "Sorry, I couldn't get an answer just now.";
+      addBubble(reply, 'assistant');
+      conversationHistory.push({ role: 'assistant', content: reply });
+      statusLine.textContent = '';
+      const category = classifyCategory(reply);
+      if (category) {
+        setActiveTopic(category);
+        pulseTopicBriefly();
+      }
+    } catch (err) {
+      addBubble("Sorry, I'm having trouble connecting right now. Please try again in a moment, or reach out to admissions directly.", 'assistant');
+      statusLine.textContent = '';
+      console.error('ACT AI widget error:', err);
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const message = chatInput.value.trim();
+    if (!message) return;
+    chatInput.value = '';
+    sendMessage(message);
+  });
+
+  // Clicking a topic card opens a conversation pre-seeded with that
+  // starter question, same as a typed message — matches the Implementation
+  // Plan's requirement that category buttons open a real conversation
+  // rather than being purely decorative.
+  topicCards.forEach(card => {
+    card.addEventListener('click', () => {
+      setActiveTopic(card.dataset.avatar);
+      const topic = currentLanguage === 'en' ? card.dataset.topicEn : card.dataset.topicTa;
+      sendMessage(topic);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Voice ("Let's Talk") — Phase 3 (English/Deepgram) + Phase 4 (Tamil/
+  // Sarvam). Streams mic audio to the backend WebSocket matching the
+  // selected language, which relays it to Deepgram's Flux agent (English,
+  // rag-backend/voice_agent.py) or the Sarvam/Pipecat pipeline (Tamil,
+  // tamil-voice-pipeline/), and plays back the spoken reply. Neither
+  // vendor's key ever reaches this file — only these relay URLs do.
+  // ---------------------------------------------------------------------
+  // English is relayed by rag-backend (Deepgram Flux, 24kHz output).
+  // Tamil is served directly by the standalone tamil-voice-pipeline service
+  // (Sarvam via Pipecat). Mic input is 16kHz on both; TTS *output* is 24kHz
+  // on both too (Sarvam's TTS natively generates at 24kHz, same as Deepgram's
+  // Aura/Flux voices) — see tamil-voice-pipeline/pipeline.py's
+  // audio_out_sample_rate. Playing 24kHz audio back at 16kHz is what made
+  // Tamil voice sound slowed-down/robotic in earlier testing.
+  const VOICE_ENDPOINTS = {
+    en: { wsUrl: 'ws://localhost:8000/voice/en', playbackSampleRate: 24000 },
+    ta: { wsUrl: 'ws://localhost:8001/voice/ta', playbackSampleRate: 24000 },
+  };
+  const MIC_SEND_SAMPLE_RATE = 16000; // must match the input sample rate on both voice paths
+
+  let voiceWs = null;
+  let voiceActive = false;
+  let micStream = null;
+  let micAudioCtx = null;
+  let micSource = null;
+  let micProcessor = null;
+  let playbackCtx = null;
+  let playbackSampleRate = 24000;
+  let nextPlayTime = 0;
+  let scheduledSources = [];
+  let speakingSilenceTimer = null;
+  let currentTurnReplyText = '';
+
+  function downsampleTo16k(float32Input, inputSampleRate) {
+    if (inputSampleRate === MIC_SEND_SAMPLE_RATE) return float32Input;
+    const ratio = inputSampleRate / MIC_SEND_SAMPLE_RATE;
+    const outLength = Math.round(float32Input.length / ratio);
+    const result = new Float32Array(outLength);
+    let outIndex = 0;
+    let inIndex = 0;
+    while (outIndex < outLength) {
+      const nextInIndex = Math.round((outIndex + 1) * ratio);
+      let sum = 0, count = 0;
+      for (let i = inIndex; i < nextInIndex && i < float32Input.length; i++) {
+        sum += float32Input[i];
+        count++;
+      }
+      result[outIndex] = count ? sum / count : 0;
+      outIndex++;
+      inIndex = nextInIndex;
+    }
+    return result;
+  }
+
+  function floatTo16BitPCM(float32Array) {
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    for (let i = 0; i < float32Array.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32Array[i]));
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return buffer;
+  }
+
+  function playPcm16Chunk(arrayBuffer) {
+    // playbackCtx is created eagerly in startVoiceSession() (synchronously,
+    // inside the click handler) — NOT lazily here. Creating/resuming an
+    // AudioContext outside a direct user-gesture callstack (e.g. from a
+    // WebSocket onmessage handler, as this used to do) makes browsers start
+    // it "suspended": every source.start() call plays into silence with no
+    // error at all, which is exactly what made replies inaudible despite
+    // Deepgram/Sarvam confirming audio was generated and sent.
+    if (!playbackCtx) return;
+    const int16 = new Int16Array(arrayBuffer);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x8000;
+
+    const audioBuffer = playbackCtx.createBuffer(1, float32.length, playbackSampleRate);
+    audioBuffer.copyToChannel(float32, 0);
+
+    const source = playbackCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(playbackCtx.destination);
+    source.onended = () => {
+      const idx = scheduledSources.indexOf(source);
+      if (idx !== -1) scheduledSources.splice(idx, 1);
+    };
+    scheduledSources.push(source);
+
+    const startAt = Math.max(nextPlayTime, playbackCtx.currentTime);
+    source.start(startAt);
+    nextPlayTime = startAt + audioBuffer.duration;
+  }
+
+  // Barge-in: called when Deepgram reports the user has started speaking
+  // again while ACT AI's reply is still queued/playing. Without this, every
+  // already-scheduled chunk (queued via the gapless-playback scheduling in
+  // playPcm16Chunk above) keeps playing to completion regardless of the
+  // user talking over it — true half-duplex behavior that makes the
+  // assistant feel rigid. Stopping every scheduled source and resetting
+  // nextPlayTime to "now" clears the queue so the next reply's audio starts
+  // fresh instead of stacking up after the old, now-irrelevant reply.
+  function stopPlayback() {
+    for (const source of scheduledSources) {
+      try { source.stop(); } catch (e) { /* already finished/stopped */ }
+    }
+    scheduledSources = [];
+    if (playbackCtx) nextPlayTime = playbackCtx.currentTime;
+  }
+
+  function setTalkButtonState(label) {
+    const label_el = talkBtn.querySelector('span');
+    if (label_el) label_el.textContent = label;
+  }
+
+  async function startVoiceSession() {
+    voiceActive = true;
+    setTalkButtonState(UI_TEXT[currentLanguage].connecting);
+    statusLine.textContent = 'Connecting to ACT AI voice...';
+
+    const endpoint = VOICE_ENDPOINTS[currentLanguage];
+    playbackSampleRate = endpoint.playbackSampleRate;
+
+    // Create (and explicitly resume) the playback AudioContext HERE — still
+    // synchronous within the click handler's callstack, before any `await`.
+    // Browsers only auto-unlock audio for contexts created/resumed from a
+    // direct user-gesture handler; creating it later (e.g. lazily on first
+    // incoming audio message, as this used to do) leaves it "suspended" and
+    // every source.start() plays into silence with no error.
+    playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: playbackSampleRate });
+    nextPlayTime = playbackCtx.currentTime;
+    playbackCtx.resume();
+
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      statusLine.textContent = 'Microphone permission is needed for voice chat.';
+      voiceActive = false;
+      setTalkButtonState(UI_TEXT[currentLanguage].talk);
+      if (playbackCtx) { playbackCtx.close(); playbackCtx = null; }
+      return;
+    }
+
+    voiceWs = new WebSocket(endpoint.wsUrl);
+    voiceWs.binaryType = 'arraybuffer';
+
+    voiceWs.onopen = () => {
+      micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      micSource = micAudioCtx.createMediaStreamSource(micStream);
+      micProcessor = micAudioCtx.createScriptProcessor(4096, 1, 1);
+      micSource.connect(micProcessor);
+      micProcessor.connect(micAudioCtx.destination);
+
+      micProcessor.onaudioprocess = (event) => {
+        if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) return;
+        const input = event.inputBuffer.getChannelData(0);
+        const downsampled = downsampleTo16k(input, micAudioCtx.sampleRate);
+        voiceWs.send(floatTo16BitPCM(downsampled));
+      };
+
+      setTalkButtonState(UI_TEXT[currentLanguage].endCall);
+      statusLine.textContent = "Listening… speak whenever you're ready.";
+    };
+
+    voiceWs.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'ConversationText' && msg.content) {
+            addBubble(msg.content, msg.role === 'user' ? 'user' : 'assistant');
+            if (msg.role !== 'user') {
+              // Deepgram sends ConversationText per sentence as the agent
+              // speaks, not once per full reply — classifying each
+              // fragment in isolation made the highlight jump mid-answer
+              // (e.g. "You can apply..." scores Admissions, then "...we
+              // offer several courses" in the SAME reply flips it to
+              // Courses). Accumulating the whole turn's text and
+              // reclassifying on the cumulative total lets stronger,
+              // earlier evidence keep winning instead of flapping on
+              // whatever sentence just arrived.
+              currentTurnReplyText += ' ' + msg.content;
+              const category = classifyCategory(currentTurnReplyText);
+              if (category) setActiveTopic(category);
+            }
+          } else if (msg.type === 'UserStartedSpeaking') {
+            currentTurnReplyText = ''; // new turn starting — don't let it inherit the last turn's accumulated text
+            stopPlayback();
+            if (speakingSilenceTimer) { clearTimeout(speakingSilenceTimer); speakingSilenceTimer = null; }
+            setSpeakingTopic(false);
+            statusLine.textContent = 'Listening...';
+          } else if (msg.type === 'AgentThinking') {
+            statusLine.textContent = 'ACT AI is thinking...';
+          }
+        } catch (e) {
+          // non-JSON control frame — ignore
+        }
+      } else {
+        playPcm16Chunk(event.data);
+        statusLine.textContent = 'ACT AI is speaking...';
+        // Deepgram doesn't send an explicit "agent stopped speaking" event,
+        // so infer end-of-speech from a gap in incoming audio chunks: keep
+        // the pulse alive on every chunk, and only clear it once no new
+        // chunk has arrived for 400ms (comfortably longer than the gap
+        // between chunks in normal playback, per the chunk-cadence fix in
+        // voice_agent.py, but short enough to feel responsive).
+        setSpeakingTopic(true);
+        if (speakingSilenceTimer) clearTimeout(speakingSilenceTimer);
+        speakingSilenceTimer = setTimeout(() => {
+          setSpeakingTopic(false);
+          speakingSilenceTimer = null;
+        }, 400);
+      }
+    };
+
+    voiceWs.onerror = () => {
+      statusLine.textContent = 'Voice connection error. Please try again.';
+    };
+
+    voiceWs.onclose = () => {
+      stopVoiceSession();
+    };
+  }
+
+  function stopVoiceSession() {
+    voiceActive = false;
+    if (micProcessor) { micProcessor.disconnect(); micProcessor.onaudioprocess = null; micProcessor = null; }
+    if (micSource) { micSource.disconnect(); micSource = null; }
+    if (micAudioCtx) { micAudioCtx.close(); micAudioCtx = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (playbackCtx) { playbackCtx.close(); playbackCtx = null; nextPlayTime = 0; }
+    scheduledSources = [];
+    if (speakingSilenceTimer) { clearTimeout(speakingSilenceTimer); speakingSilenceTimer = null; }
+    currentTurnReplyText = '';
+    setSpeakingTopic(false);
+    if (voiceWs) { try { voiceWs.close(); } catch (e) {} voiceWs = null; }
+    setTalkButtonState(UI_TEXT[currentLanguage].talk);
+    statusLine.textContent = '';
+  }
+
+  talkBtn.addEventListener('click', () => {
+    if (voiceActive) {
+      stopVoiceSession();
+    } else {
+      startVoiceSession();
+    }
+  });
+</script>
+
+</body>
+</html>
