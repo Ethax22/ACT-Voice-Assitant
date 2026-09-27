@@ -1,8 +1,18 @@
 __pycache__/
+.env
 *.pyc
 venv/
 .venv/
 *.log
-.env
-*.env
-!*.env.example
+
+# OS / editor junk — unrelated to the project, shouldn't ever be committed
+.DS_Store
+Thumbs.db
+nohup.out
+.vscode/
+.idea/
+*.swp
+
+# Python packaging/test cache noise
+.pytest_cache/
+*.egg-info/

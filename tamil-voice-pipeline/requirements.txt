@@ -1,6 +1,0 @@
-# Verify extras group names against the installed pipecat-ai version —
-# Pipecat's optional-dependency groups have changed across releases.
-pipecat-ai[sarvam,openai,websocket]
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-python-dotenv==1.0.1

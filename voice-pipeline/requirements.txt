@@ -1,0 +1,11 @@
+# Verify extras group names against the installed pipecat-ai version —
+# Pipecat's optional-dependency groups have changed across releases.
+pipecat-ai[sarvam,openai,websocket]
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-dotenv==1.0.1
+# Pulled in transitively by pipecat-ai already, but language_detection.py
+# imports it directly (calling Sarvam's batch STT endpoint for language
+# auto-detect), so it's pinned explicitly rather than relying on a
+# transitive version that could change under us.
+aiohttp==3.14.3

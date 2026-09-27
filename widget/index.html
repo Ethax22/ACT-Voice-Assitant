@@ -538,13 +538,12 @@
   // pulse) tracks whether ACT AI is actively producing audio for it right
   // now. Category is picked by simple keyword matching against the reply
   // text rather than a backend field, since the voice path's reply travels
-  // through Deepgram's strict OpenAI-compatible SSE schema — main.py's
-  // _stream_reply_sse already documents that any non-standard field gets
-  // silently dropped by Deepgram, so this can't ride along as backend
-  // metadata without breaking voice. Matching client-side on text that's
-  // already available (the typed-chat JSON reply, or Deepgram's
-  // ConversationText relay message) works identically for both paths with
-  // no protocol changes.
+  // through the voice pipeline's strict OpenAI-compatible SSE schema — an
+  // unrecognized extra field there risks being silently dropped, so this
+  // can't ride along as backend metadata without risking breaking voice.
+  // Matching client-side on text that's already available (the typed-chat
+  // JSON reply, or the voice relay's ConversationText message) works
+  // identically for both paths with no protocol changes.
   // ---------------------------------------------------------------------
   const AVATAR_KEYWORDS = {
     'about-us': ['found', 'establish', 'accredit', 'naac', 'campus', 'history', 'autonomous', 'vision', 'mission', 'agni college', 'about act'],
@@ -633,10 +632,26 @@
   const chatLog = document.getElementById('chatLog');
   const sendBtn = document.getElementById('sendBtn');
 
-  // Language is explicitly picked by the visitor — no auto-detect (per the
-  // locked architecture decision). Drives both which starter prompts/labels
-  // show and which voice pipeline "Let's Talk" connects to.
+  // Language auto-detects by default (CLAUDE.md decision #5, updated
+  // 2026-09-23 — superseding the original explicit-picker-only design): typed
+  // chat detects Tamil vs. English from the input text's script, voice
+  // detects it from a short initial mic snippet sent to voice-pipeline's
+  // /detect-language (Phase 6). The toggle buttons are a manual override,
+  // not the primary path — once the visitor clicks one, auto-detect stops
+  // overriding their choice for the rest of the session.
   let currentLanguage = 'en';
+  let languageManuallySet = false;
+
+  // Tamil script lives in the U+0B80–U+0BFF Unicode block. A single Tamil
+  // character in an otherwise-English message is enough to treat the whole
+  // message as Tamil — visitors don't typically mix scripts mid-sentence,
+  // and requiring a majority would misclassify a short Tamil message that
+  // happens to include an English loanword or acronym.
+  const TAMIL_SCRIPT_PATTERN = /[஀-௿]/;
+
+  function detectScriptLanguage(text) {
+    return TAMIL_SCRIPT_PATTERN.test(text) ? 'ta' : 'en';
+  }
 
   const UI_TEXT = {
     en: {
@@ -682,7 +697,9 @@
 
   langToggle.addEventListener('click', (e) => {
     const btn = e.target.closest('.lang-btn');
-    if (!btn || btn.dataset.lang === currentLanguage) return;
+    if (!btn) return;
+    languageManuallySet = true; // stop auto-detect from overriding an explicit choice
+    if (btn.dataset.lang === currentLanguage) return;
     if (voiceActive) stopVoiceSession(); // switching language mid-call would talk to the wrong pipeline
     applyLanguage(btn.dataset.lang);
   });
@@ -701,6 +718,16 @@
 
   async function sendMessage(message) {
     if (!message) return;
+
+    // Auto-detect (Phase 6): a typed message's script decides the UI
+    // language for this and future turns, unless the visitor has already
+    // picked one via the toggle. A topic-card click sends fixed starter text
+    // in whatever language is already active, so it never itself changes
+    // detection — only a visitor's own typed words do.
+    if (!languageManuallySet) {
+      const detected = detectScriptLanguage(message);
+      if (detected !== currentLanguage) applyLanguage(detected);
+    }
 
     addBubble(message, 'user');
     conversationHistory.push({ role: 'user', content: message });
@@ -756,25 +783,30 @@
   });
 
   // ---------------------------------------------------------------------
-  // Voice ("Let's Talk") — Phase 3 (English/Deepgram) + Phase 4 (Tamil/
-  // Sarvam). Streams mic audio to the backend WebSocket matching the
-  // selected language, which relays it to Deepgram's Flux agent (English,
-  // rag-backend/voice_agent.py) or the Sarvam/Pipecat pipeline (Tamil,
-  // tamil-voice-pipeline/), and plays back the spoken reply. Neither
-  // vendor's key ever reaches this file — only these relay URLs do.
+  // Voice ("Let's Talk") — both languages now served by the same standalone
+  // voice-pipeline service (Sarvam via Pipecat), generalized from
+  // tamil-voice-pipeline/ in Phase 3 (CLAUDE.md decision #1 — English's
+  // Deepgram-based relay was retired 2026-09-25). Streams mic audio to the
+  // backend WebSocket matching the selected language, which relays it to
+  // the Sarvam/Pipecat pipeline and plays back the spoken reply. The vendor
+  // key never reaches this file — only the relay URL does.
   // ---------------------------------------------------------------------
-  // English is relayed by rag-backend (Deepgram Flux, 24kHz output).
-  // Tamil is served directly by the standalone tamil-voice-pipeline service
-  // (Sarvam via Pipecat). Mic input is 16kHz on both; TTS *output* is 24kHz
-  // on both too (Sarvam's TTS natively generates at 24kHz, same as Deepgram's
-  // Aura/Flux voices) — see tamil-voice-pipeline/pipeline.py's
+  // Mic input is 16kHz on both; TTS *output* is 24kHz on both too (Sarvam's
+  // TTS natively generates at 24kHz) — see voice-pipeline/pipeline.py's
   // audio_out_sample_rate. Playing 24kHz audio back at 16kHz is what made
   // Tamil voice sound slowed-down/robotic in earlier testing.
   const VOICE_ENDPOINTS = {
-    en: { wsUrl: 'ws://localhost:8000/voice/en', playbackSampleRate: 24000 },
+    en: { wsUrl: 'ws://localhost:8001/voice/en', playbackSampleRate: 24000 },
     ta: { wsUrl: 'ws://localhost:8001/voice/ta', playbackSampleRate: 24000 },
   };
   const MIC_SEND_SAMPLE_RATE = 16000; // must match the input sample rate on both voice paths
+
+  // Voice auto-detect (Phase 6): same voice-pipeline service, a plain POST
+  // rather than a WebSocket. Detection needs ~1.5s of speech to be reliable
+  // (confirmed in backend testing against short clips) — DETECTION_SAMPLES
+  // is that duration's worth of 16kHz mono samples.
+  const DETECT_LANGUAGE_URL = 'http://localhost:8001/detect-language';
+  const DETECTION_SAMPLES = MIC_SEND_SAMPLE_RATE * 1.5;
 
   let voiceWs = null;
   let voiceActive = false;
@@ -871,23 +903,80 @@
     if (label_el) label_el.textContent = label;
   }
 
+  function concatArrayBuffers(buffers) {
+    const totalLength = buffers.reduce((sum, b) => sum + b.byteLength, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const buffer of buffers) {
+      result.set(new Uint8Array(buffer), offset);
+      offset += buffer.byteLength;
+    }
+    return result.buffer;
+  }
+
+  // Records ~DETECTION_SAMPLES worth of mic audio and posts it to
+  // /detect-language, resolving to 'en'/'ta' (or null if undetermined —
+  // caller falls back to the current language rather than force a guess,
+  // same "don't force it" guidance as the Implementation Plan's Phase 6).
+  // Returns the buffered PCM16 chunks too, so the caller can flush them into
+  // the real voice session afterward instead of discarding what the visitor
+  // already said while detection was running.
+  function recordSnippetForDetection(stream) {
+    return new Promise((resolve) => {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(stream);
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const chunks = [];
+      let sampleCount = 0;
+      let settled = false;
+
+      const finish = async () => {
+        if (settled) return;
+        settled = true;
+        processor.disconnect();
+        source.disconnect();
+        ctx.close();
+        const combined = concatArrayBuffers(chunks);
+        let language = null;
+        try {
+          const res = await fetch(DETECT_LANGUAGE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: combined,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            language = data.language || null;
+          }
+        } catch (err) {
+          console.error('ACT AI language detection error:', err);
+        }
+        resolve({ language, chunks });
+      };
+
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        const downsampled = downsampleTo16k(input, ctx.sampleRate);
+        chunks.push(floatTo16BitPCM(downsampled));
+        sampleCount += downsampled.length;
+        if (sampleCount >= DETECTION_SAMPLES) finish();
+      };
+
+      source.connect(processor);
+      processor.connect(ctx.destination);
+
+      // Safety net: if the visitor cancels (End Call) or the mic feed dies
+      // mid-detection, onaudioprocess may never reach DETECTION_SAMPLES —
+      // silence still fires the event, but stopped tracks eventually stop
+      // firing it at all. Without this, the Promise (and startVoiceSession's
+      // await on it) would hang indefinitely.
+      setTimeout(finish, 5000);
+    });
+  }
+
   async function startVoiceSession() {
     voiceActive = true;
     setTalkButtonState(UI_TEXT[currentLanguage].connecting);
-    statusLine.textContent = 'Connecting to ACT AI voice...';
-
-    const endpoint = VOICE_ENDPOINTS[currentLanguage];
-    playbackSampleRate = endpoint.playbackSampleRate;
-
-    // Create (and explicitly resume) the playback AudioContext HERE — still
-    // synchronous within the click handler's callstack, before any `await`.
-    // Browsers only auto-unlock audio for contexts created/resumed from a
-    // direct user-gesture handler; creating it later (e.g. lazily on first
-    // incoming audio message, as this used to do) leaves it "suspended" and
-    // every source.start() plays into silence with no error.
-    playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: playbackSampleRate });
-    nextPlayTime = playbackCtx.currentTime;
-    playbackCtx.resume();
 
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -895,14 +984,58 @@
       statusLine.textContent = 'Microphone permission is needed for voice chat.';
       voiceActive = false;
       setTalkButtonState(UI_TEXT[currentLanguage].talk);
-      if (playbackCtx) { playbackCtx.close(); playbackCtx = null; }
       return;
     }
+
+    // Auto-detect (Phase 6): buffer a short snippet and identify its
+    // language BEFORE opening a pipeline, since which pipeline to open
+    // (persona, TTS voice, everything) depends on the answer. Skipped
+    // entirely once the visitor has picked a language via the toggle —
+    // manual choice always wins, per CLAUDE.md decision #5.
+    let bufferedChunks = [];
+    if (!languageManuallySet) {
+      statusLine.textContent = 'Detecting language…';
+      const { language, chunks } = await recordSnippetForDetection(micStream);
+      if (!voiceActive) return; // cancelled (End Call) while detection was in flight
+      bufferedChunks = chunks;
+      if (language && language !== currentLanguage) applyLanguage(language);
+    }
+
+    const endpoint = VOICE_ENDPOINTS[currentLanguage];
+    if (!endpoint) {
+      // Defensive fallback — every supported language should have an entry
+      // in VOICE_ENDPOINTS above. If this ever fires, typed chat still works.
+      statusLine.textContent = 'Voice chat is temporarily unavailable for this language — please type your question instead.';
+      voiceActive = false;
+      setTalkButtonState(UI_TEXT[currentLanguage].talk);
+      micStream.getTracks().forEach((t) => t.stop());
+      micStream = null;
+      return;
+    }
+
+    statusLine.textContent = 'Connecting to ACT AI voice...';
+    playbackSampleRate = endpoint.playbackSampleRate;
+
+    // Create (and explicitly resume) the playback AudioContext HERE — still
+    // within the click handler's async continuation, which browsers still
+    // treat as user-gesture-initiated as long as nothing awaited so far
+    // involved user interaction of its own (getUserMedia's permission
+    // prompt and the detection fetch above both qualify). Creating it later
+    // (e.g. lazily on first incoming audio message, as this used to do)
+    // leaves it "suspended" and every source.start() plays into silence
+    // with no error.
+    playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: playbackSampleRate });
+    nextPlayTime = playbackCtx.currentTime;
+    playbackCtx.resume();
 
     voiceWs = new WebSocket(endpoint.wsUrl);
     voiceWs.binaryType = 'arraybuffer';
 
     voiceWs.onopen = () => {
+      // Flush whatever the visitor already said while detection was
+      // running, so they don't have to repeat their first sentence.
+      for (const chunk of bufferedChunks) voiceWs.send(chunk);
+
       micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       micSource = micAudioCtx.createMediaStreamSource(micStream);
       micProcessor = micAudioCtx.createScriptProcessor(4096, 1, 1);
