@@ -5,6 +5,11 @@ venv/
 .venv/
 *.log
 
+# Phase 10 — conversation logs (transcripts + audio). Real visitor data,
+# 90-day auto-pruned at runtime — never committed.
+rag-backend/logs/
+voice-pipeline/logs/
+
 # OS / editor junk — unrelated to the project, shouldn't ever be committed
 .DS_Store
 Thumbs.db

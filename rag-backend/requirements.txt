@@ -6,3 +6,5 @@ python-dotenv==1.0.1
 tiktoken==0.8.0
 pydantic==2.10.3
 websockets>=13
+gspread==6.1.4
+google-auth==2.37.0

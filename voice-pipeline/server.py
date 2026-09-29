@@ -9,6 +9,7 @@ integration (voice_agent.py, retired 2026-09-25) — it now goes through this
 same Sarvam/Pipecat service Tamil already used, per CLAUDE.md decision #1.
 """
 import os
+import uuid
 
 from dotenv import load_dotenv
 
@@ -18,10 +19,18 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pipecat.pipeline.runner import PipelineRunner
 
+from conversation_logger import prune_old_logs
 from language_detection import detect_language
 from pipeline import build_pipeline
 
 app = FastAPI(title="ACT AI Voice Pipeline")
+
+
+@app.on_event("startup")
+async def _prune_logs_on_startup():
+    """Phase 10: 90-day retention, auto-pruned at startup — see
+    rag-backend/main.py's identical startup hook for the same reasoning."""
+    prune_old_logs()
 
 WIDGET_ALLOWED_ORIGINS = [
     origin.strip()
@@ -53,7 +62,8 @@ async def _run_voice_session(websocket: WebSocket, language: str):
         return
 
     await websocket.accept()
-    worker = build_pipeline(websocket, language=language)
+    session_id = uuid.uuid4().hex
+    worker = build_pipeline(websocket, language=language, session_id=session_id)
     runner = PipelineRunner()
     await runner.run(worker)
 

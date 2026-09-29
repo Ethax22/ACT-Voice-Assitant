@@ -1,0 +1,322 @@
+"""Per-topic TTS voice switching + mid-call spoken language switching, both
+restored/added 2026-09-29.
+
+History: the original English path (Deepgram's Voice Agent, retired 2026-09-
+25 per CLAUDE.md decision #1) supported exactly this — four distinct voices,
+one per topic (about-us/admissions/courses/placements), classified from the
+visitor's question and applied to the UPCOMING answer via Deepgram's
+mid-session `UpdateSpeak` message. That logic lived in the now-deleted
+`rag-backend/voice_agent.py` (see git history, commit 848cbad) and was never
+carried over to the unified Sarvam pipeline — Tamil never had it either,
+since Tamil was always Sarvam-only and this feature was Deepgram-specific.
+This module rebuilds it for BOTH languages on Sarvam, plus adds mid-call
+language switching, which never existed in either the old or new design.
+
+Mechanism (confirmed live against the installed Pipecat 1.12.0 + Sarvam's
+real API, not assumed): Sarvam's realtime STT and streaming TTS both support
+a live `config.update` over their already-open per-call WebSocket —
+`STTUpdateSettingsFrame`/`TTSUpdateSettingsFrame` reach that mechanism from
+inside a Pipecat pipeline without tearing down or reconnecting anything
+(`SarvamRealtimeSTTService._update_settings` / `SarvamTTSService._update_
+settings`, both in the installed package). `LLMUpdateSettingsFrame` does the
+analogous thing for the persona's system_instruction. So a language switch
+is three settings-update frames, not a pipeline rebuild.
+
+Classification is a plain keyword heuristic identical in spirit to the old
+Deepgram-era `classify_category` (and to widget/index.html's client-side
+`classifyCategory`, which does the same thing for the assistant's text to
+pick which avatar tile to highlight — kept as a separate, not shared,
+implementation since one runs server-side in Python on the VISITOR'S
+question and the other runs client-side in JS on the ASSISTANT'S reply).
+
+Everything Tamil-related here (keywords, switch-trigger phrases) is a
+first-pass, not verified by a native speaker — same caveat as the VAD
+tuning in pipeline.py: needs a real conversation test, not just code review,
+before treating it as final.
+"""
+import re
+from dataclasses import dataclass
+from typing import Literal
+
+from loguru import logger
+from pipecat.frames.frames import (
+    Frame,
+    LLMUpdateSettingsFrame,
+    ManuallySwitchServiceFrame,
+    STTUpdateSettingsFrame,
+    TranscriptionFrame,
+    TTSUpdateSettingsFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.settings import LLMSettings, STTSettings, TTSSettings
+
+Language = Literal["en", "ta"]
+Topic = Literal["about-us", "admissions", "courses", "placements"]
+
+# One voice per topic, per language. "about-us" doubles as the default/
+# fallback voice (unmatched questions, and the voice a call starts on) —
+# same pattern the old Deepgram design used rather than introducing a fifth
+# voice. All four names below were verified live against Sarvam's real
+# /text-to-speech endpoint for BOTH en-IN and ta-IN (2026-09-29) — Sarvam's
+# bulbul:v3 speakers are cross-lingual identities, not English-only or
+# Tamil-only, so the same four names work for both languages; only the
+# language-appropriate default (priya/kavya) differs, matching what was
+# already locked in per language before this change.
+TOPIC_VOICES: dict[Language, dict[Topic, str]] = {
+    "en": {
+        "about-us": "priya",
+        "admissions": "rahul",
+        "courses": "pooja",
+        "placements": "rohan",
+    },
+    "ta": {
+        "about-us": "kavya",
+        "admissions": "rahul",
+        "courses": "pooja",
+        "placements": "rohan",
+    },
+}
+
+# English keywords ported verbatim from the deleted rag-backend/voice_agent.py
+# (git commit 848cbad) — same collisions were already debugged there (see
+# its comments on "mission" vs "admission", and B.E./B.Tech backfiring into
+# "courses"), no reason to rediscover those bugs.
+CATEGORY_KEYWORDS_EN: dict[Topic, list[str]] = {
+    "about-us": ["found", "establish", "accredit", "naac", "campus", "history", "autonomous", "vision", "mission", "agni college", "about act"],
+    "courses": ["course", "program", "department", "branch", "curriculum", "semester", "syllabus"],
+    "admissions": ["admission", "apply", "application", "counsel", "entrance", "eligib", "fee", "cutoff", "seat", "enroll"],
+    "placements": ["placement", "recruit", "company", "companies", "package", "salary", "intern", "hire", "hiring", "offer", "drive"],
+}
+
+# Tamil keywords — new, first draft (see module docstring). Primarily Tamil
+# script, with a handful of common Latin-script/Tanglish spellings since
+# Sarvam's realtime STT was observed (real session, 2026-09-29) sometimes
+# transliterating Tamil speech into Latin script rather than Tamil script
+# (e.g. "Ethume koodaathu" for what was spoken in Tamil).
+CATEGORY_KEYWORDS_TA: dict[Topic, list[str]] = {
+    # "பற்றி"/"பற்றிய" ("about") deliberately excluded — it's a generic
+    # connector that shows up in almost any question phrased "X பற்றி
+    # சொல்லுங்க" ("tell me about X"), so it scored about-us a point on
+    # EVERY topic and stole ties by being listed first — the exact same
+    # collision class the English keywords' own comments warned about
+    # ("mission" vs "admission"), caught live via a real test run of this
+    # function before shipping it, not left for Prakash to find.
+    "about-us": ["கல்லூரி", "நிறுவ", "ஸ்தாபிக்க", "அங்கீகார", "தன்னாட்சி", "வரலாறு", "காம்பஸ்"],
+    "courses": ["படிப்பு", "பாடநெறி", "துறை", "பிரிவு", "பாடத்திட்டம்", "செமஸ்டர்", "கோர்ஸ்", "course", "department"],
+    "admissions": ["சேர்க்கை", "விண்ணப்ப", "கலந்தாய்வு", "தகுதி", "கட்டணம்", "கட் ஆஃப்", "admission", "seat"],
+    "placements": ["வேலைவாய்ப்பு", "பணியமர்த்த", "நிறுவனங்கள்", "சம்பளம்", "பயிற்சி", "placement", "salary"],
+}
+
+CATEGORY_KEYWORDS: dict[Language, dict[Topic, list[str]]] = {
+    "en": CATEGORY_KEYWORDS_EN,
+    "ta": CATEGORY_KEYWORDS_TA,
+}
+
+
+def classify_category(text: str, language: Language) -> Topic | None:
+    if not text:
+        return None
+    lower = text.lower()
+    best_key: Topic | None = None
+    best_score = 0
+    for key, keywords in CATEGORY_KEYWORDS[language].items():
+        # Word-boundary-before-only, same fix as the old voice_agent.py: lets
+        # "admission" still match "admissions"/"applying" while stopping
+        # "mission" (about-us) from matching mid-word inside "admission".
+        score = sum(1 for kw in keywords if re.search(r"\b" + re.escape(kw), lower))
+        if score > best_score:
+            best_score = score
+            best_key = key
+    return best_key
+
+
+LANGUAGE_CODES: dict[Language, str] = {"en": "en-IN", "ta": "ta-IN"}
+
+# Mid-call language-switch detection. Deliberately requires a nearby speak/
+# switch verb, not just the bare word "tamil"/"english" — ACT's own content
+# says "TNEA (Tamil Nadu Engineering Admissions)" and "medium of instruction
+# is English" routinely, and a bare keyword match would misfire a switch on
+# an ordinary admissions question. First-pass phrasing, needs real-call
+# verification (module docstring).
+_SWITCH_TO_TA_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        # Negative lookahead excludes "in Tamil Nadu" (TNEA = Tamil Nadu
+        # Engineering Admissions, comes up constantly in ACT's own
+        # admissions content) — caught live via a real test run before
+        # shipping, same as the Tamil keyword fix above.
+        r"\bin tamil\b(?!\s*nadu)",
+        r"\bspeak(ing)?\s+tamil\b",
+        r"\btalk(ing)?\s+(in\s+)?tamil\b",
+        r"\bswitch(ed)?\s+to\s+tamil\b",
+        r"\btamil\s+please\b",
+        r"\btamil[\s-]*la\s+pesu",
+        r"தமிழில்\s*பேசு",
+        r"தமிழ்ல\s*பேசு",
+        r"தமிழ்\s*வேணும்",
+    ]
+]
+_SWITCH_TO_EN_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\bin english\b",
+        r"\bspeak(ing)?\s+english\b",
+        r"\btalk(ing)?\s+(in\s+)?english\b",
+        r"\bswitch(ed)?\s+to\s+english\b",
+        r"\benglish\s+please\b",
+        r"இங்கிலீஷ்ல?\s*பேசு",
+        r"ஆங்கிலத்தில்\s*பேசு",
+    ]
+]
+
+
+def detect_language_switch(text: str) -> Language | None:
+    if not text:
+        return None
+    if any(p.search(text) for p in _SWITCH_TO_TA_PATTERNS):
+        return "ta"
+    if any(p.search(text) for p in _SWITCH_TO_EN_PATTERNS):
+        return "en"
+    return None
+
+
+@dataclass
+class ConversationRouterCallbacks:
+    """Lets pipeline.py supply language-dependent values (persona prompt)
+    without this module importing pipeline.py back (would be circular)."""
+
+    persona_prompts: dict[Language, str]
+
+
+class ConversationRouter(FrameProcessor):
+    """Sits between STT and the user-turn aggregator. On each finalized user
+    transcript: either handles a spoken language-switch request (updates
+    STT/TTS/LLM settings live, no reconnect), or classifies the topic and
+    switches to that topic's voice for the upcoming answer. Passes every
+    frame through unchanged either way — this only ever adds side-effect
+    frames, never consumes or blocks the transcript itself, so the
+    user-aggregator downstream still sees every TranscriptionFrame exactly
+    as before.
+
+    `cloned_services_by_topic`, added 2026-09-29: maps a topic to its own
+    dedicated `ClonedVoiceTTSService` instance, for topics that have a
+    cloned voice configured (pipeline.py builds these; empty dict if none
+    are). A topic present here gets a `ManuallySwitchServiceFrame` to make
+    that instance active in the `ServiceSwitcher` pipeline.py wraps around
+    it and the stock `SarvamTTSService`; a topic absent from it instead gets
+    a plain voice-only `TTSUpdateSettingsFrame` targeted at `stock_tts`,
+    exactly as before this feature existed. When `cloned_services_by_topic`
+    is empty (the common case today — no staff recordings exist yet), this
+    class's behavior is unchanged from before per-topic cloning existed:
+    every topic just gets an untargeted voice update on the single `tts` in
+    the pipeline."""
+
+    def __init__(
+        self,
+        initial_language: Language,
+        callbacks: ConversationRouterCallbacks,
+        stock_tts,
+        cloned_services_by_topic: dict[Topic, "FrameProcessor"] | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._language: Language = initial_language
+        self._callbacks = callbacks
+        self._stock_tts = stock_tts
+        self._cloned_services_by_topic = cloned_services_by_topic or {}
+
+    @property
+    def language(self) -> Language:
+        return self._language
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame) and frame.text and frame.text.strip():
+            await self._handle_transcript(frame.text)
+
+        await self.push_frame(frame, direction)
+
+    async def _activate_topic_voice(self, category: Topic):
+        """Make the right TTS instance active/configured for `category`,
+        under the CURRENT language. Handles both the no-clones case (a
+        single stock `tts`, untargeted settings update — unchanged behavior)
+        and the switcher case (multiple instances, explicit activation)."""
+        cloned_service = self._cloned_services_by_topic.get(category)
+        if cloned_service is not None:
+            # Its voice_id and (per the live language update below) language
+            # are already correct — just make it the active member.
+            await self.push_frame(
+                ManuallySwitchServiceFrame(service=cloned_service),
+                FrameDirection.DOWNSTREAM,
+            )
+            logger.debug(f"ConversationRouter: topic={category!r} -> cloned voice ({self._language})")
+            return
+
+        voice = TOPIC_VOICES[self._language][category]
+        if self._cloned_services_by_topic:
+            # A switcher exists (at least one OTHER topic is cloned) — this
+            # topic isn't, so make sure the stock service is the active
+            # member before/alongside updating its voice.
+            await self.push_frame(
+                ManuallySwitchServiceFrame(service=self._stock_tts),
+                FrameDirection.DOWNSTREAM,
+            )
+        await self.push_frame(
+            TTSUpdateSettingsFrame(
+                service=self._stock_tts if self._cloned_services_by_topic else None,
+                delta=TTSSettings(voice=voice),
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        logger.debug(f"ConversationRouter: topic={category!r} -> stock voice={voice!r} ({self._language})")
+
+    async def _handle_transcript(self, text: str):
+        switch_target = detect_language_switch(text)
+        if switch_target and switch_target != self._language:
+            await self._switch_language(switch_target)
+            return  # meta-command, not a real question — skip topic voice pick
+
+        category = classify_category(text, self._language) or "about-us"
+        await self._activate_topic_voice(category)
+
+    async def _switch_language(self, target: Language):
+        logger.info(f"ConversationRouter: switching language {self._language!r} -> {target!r}")
+        self._language = target
+
+        # STT is upstream of this processor in the pipeline (transport.input
+        # -> stt -> [this router] -> user_aggregator -> ...), so reaching it
+        # means pushing upstream; TTS and the LLM are downstream.
+        await self.push_frame(
+            STTUpdateSettingsFrame(delta=STTSettings(language=LANGUAGE_CODES[target])),
+            FrameDirection.UPSTREAM,
+        )
+        # Untargeted + reach_inactive_services=True so EVERY TTS member
+        # (stock and every cloned instance, active or not) picks up the new
+        # language — a cloned voice is cross-lingual (module docstring in
+        # cloned_voice_tts.py) so it stays valid across the switch, it just
+        # needs telling which language to speak next. `voice=` here only
+        # matters to the stock service (cloned instances ignore `voice`,
+        # their identity is fixed per instance) — harmless no-op for them.
+        await self.push_frame(
+            TTSUpdateSettingsFrame(
+                delta=TTSSettings(
+                    language=LANGUAGE_CODES[target],
+                    voice=TOPIC_VOICES[target]["about-us"],
+                ),
+                reach_inactive_services=bool(self._cloned_services_by_topic),
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        # Reset to the default/about-us voice for the new language — mirrors
+        # a fresh call's starting state, and matters when a switcher exists:
+        # whichever topic was active before the switch stays active
+        # otherwise, even though its voice (if stock) or identity (if
+        # cloned) may no longer make sense as a "default."
+        await self._activate_topic_voice("about-us")
+        await self.push_frame(
+            LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=self._callbacks.persona_prompts[target])
+            ),
+            FrameDirection.DOWNSTREAM,
+        )

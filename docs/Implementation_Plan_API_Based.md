@@ -28,7 +28,10 @@ copy-paste-final code.
 | English voice (Deepgram) | ✅ Retired (Phase 2, 2026-09-25) — `voice_agent.py` deleted, `/voice/en` moved to `voice-pipeline/` |
 | English + Tamil voice (`voice-pipeline/`, Sarvam/Pipecat) | 🟡 Built and code-verified (Phases 3-6: generalized pipeline, greeting wired up, voice auto-detect) — still needs a real human listening/mic test (Phase 4 barge-in feel, Phase 5 voice pick), not yet done |
 | Automatic language detection | 🟡 Built (Phase 6, 2026-09-25) — typed chat fully verified; voice detection verified with synthesized test clips only, not yet a real visitor mic |
-| Voice cloning, lead capture, sensitive-question handling, logging | ⚪ Not started (Phases 7-10) |
+| Voice cloning (Phase 7) | 🟡 Code built and verified live (see §8 below) — deferred, not a launch blocker. Still needs real staff recordings (left to Prakash) before it's actually usable; also uncovered a real architecture correction (cloned voices need a separate non-streaming TTS path, not a settings swap) — see §8. |
+| Lead capture (Phase 8) | 🟡 Built, code-verified (typed chat and voice/streaming paths both tested live: `capture_lead` tool call correctly triggers on name+phone, resolves without leaking tool-call chunks to the voice pipeline, model gives a natural confirmation reply) — **not yet wired to a real Google Sheet**: no service account configured yet, so `leads.py` currently logs captured leads and no-ops the write. Needs a Google Cloud service account JSON + a Sheet shared with it (`GOOGLE_SERVICE_ACCOUNT_JSON`, `LEADS_SHEET_ID` in `rag-backend/.env`) before leads actually land anywhere durable. |
+| Sensitive-question handling (Phase 9) | 🟡 Plumbing built and verified live (`rag-backend/knowledge_base/sensitive_topics.md` retrieved automatically, system prompt prefers "Talking point:" sections near-verbatim, correctly avoids leaking unfinished-content editor notes and avoids fabricating numbers it doesn't have) — **content itself is still draft placeholder text**, not the real admissions/faculty-approved wording CLAUDE.md requires. Needs Prakash/admissions to fill in each `[ADMISSIONS: ...]` bracket in that file before launch. |
+| Logging (Phase 10) | 🟡 Built. Typed chat: verified live end-to-end (`rag-backend/conversation_logger.py`, transcript written and 90-day pruning tested with a synthetic old folder). Voice: `voice-pipeline/conversation_logger.py`'s `TranscriptLogger` + Pipecat's `AudioBufferProcessor` are wired into the pipeline and confirmed to link correctly in a dry (no real audio) pipeline-construction test — **not yet confirmed with a real voice call**, since that needs actual audio flowing through, same category of human-verification gap as Phases 4-6. |
 | Deployment | ⚪ Not started (dev-only, via ngrok) |
 
 Do not re-litigate anything marked ✅ or the historical bug fixes logged in
@@ -196,7 +199,7 @@ each:
   the same category of human-verification gap as Phase 4's turn-taking test
   and Phase 5's voice pick.
 
-## 8. Phase 7 — Voice cloning (both languages) — deferred, not a launch blocker
+## 8. Phase 7 — Voice cloning (both languages) — code built 2026-09-27, still not a launch blocker
 
 Decided 2026-09-26: v1 launches on Sarvam's **default stock voices** (already
 selected in `pipeline.py`, e.g. `kavya`) — cloning is a fast-follow
@@ -204,14 +207,60 @@ improvement done whenever staff samples are ready, not a gate on Phases 8–13.
 Don't block lead capture, logging, QA, or deployment on this phase landing
 first.
 
-- Record consented staff voice samples, both languages.
-- Clone via Sarvam's voice cloning (single vendor now, per decision #1 — no
-  need for a separate ElevenLabs comparison unless quality specifically
-  disappoints).
-- A/B test the clone by ear; lock the final voice ID.
-- Swap into `pipeline.py`'s per-language `TTS_VOICE`/settings from Phase 3 —
-  already designed as a simple parameter swap, so this stays a drop-in
-  change whenever it happens.
+**Correction (2026-09-27, verified live against the real Sarvam API, not
+assumed from docs):** this section originally assumed cloning would be "a
+simple parameter swap" into `pipeline.py`'s per-language `TTS_VOICE`
+setting. That's **wrong** — confirmed by direct testing: a cloned voice_id
+(`svc-{uuid}`, from `POST /voices/create`) is rejected with a 400/422 "not
+recognized" error by both the REST `/text-to-speech` endpoint and its
+websocket equivalent (`wss://api.sarvam.ai/text-to-speech/ws`) — the exact
+streaming TTS mechanism `pipeline.py`'s `SarvamTTSService` uses for stock
+voices. Cloned voices only work through the separate, non-streaming `POST
+/voices/clone` endpoint, which returns one complete base64 WAV per call
+(under the key `audio_b64` — confirmed live; note this doesn't even match
+the `audio` key Sarvam's own playground-generated code sample shows, so that
+sample wasn't trustworthy either). See `voice-pipeline/cloned_voice_tts.py`'s
+module docstring for the full account.
+
+**What got built instead** (real code, not just a plan revision):
+- `voice-pipeline/cloned_voice_tts.py`: `ClonedVoiceTTSService`, a custom
+  Pipecat `TTSService` subclass that calls `POST /voices/clone` per
+  utterance and yields the result as a `TTSAudioRawFrame`, modeled closely
+  on Pipecat's own `SarvamHttpTTSService` (same non-streaming batch-call
+  shape, different endpoint/response field). **Real tradeoff, not free**:
+  this is a full request/response round-trip per bot utterance, not
+  progressive streamed audio — a language using a cloned voice will have a
+  brief pause before speech starts that stock-voice languages don't have.
+- `voice-pipeline/pipeline.py`: added `CLONED_VOICE_IDS` (read from
+  `CLONED_VOICE_ID_EN` / `CLONED_VOICE_ID_TA` env vars). If set for a
+  language, `build_pipeline()` swaps in `ClonedVoiceTTSService` for that
+  language only — unset (the default) keeps the exact previous stock-voice
+  behavior unchanged. An aiohttp session opened for the cloned path is
+  closed on `on_client_disconnected`.
+- `voice-pipeline/create_cloned_voice.py`: a one-off CLI script — run
+  `python create_cloned_voice.py <audio_file> <en|ta>` once a consented
+  staff sample is recorded, and it prints the resulting `voice_id` to paste
+  into `.env`. No further code change or redeploy needed after that.
+- **Verified live** end-to-end using a synthetic stand-in reference clip
+  (Sarvam's own stock `priya` voice, since no real staff recording exists
+  yet): `create_cloned_voice.py` successfully created a cloned voice,
+  `ClonedVoiceTTSService.run_tts()` successfully generated real audio from
+  it, and a full pipeline dry-construction test confirmed `pipeline.py`
+  correctly swaps in `ClonedVoiceTTSService` in place of `SarvamTTSService`
+  when a `CLONED_VOICE_ID_*` env var is set. All test voices created during
+  this verification were deleted from Sarvam afterward.
+
+**Still needed before this phase is actually "done"**:
+- Record consented staff voice samples, both languages (explicitly left to
+  Prakash, not attempted here).
+- Run `create_cloned_voice.py` on each real recording, put the resulting
+  `voice_id`s in `voice-pipeline/.env`.
+- A/B test the real clone by ear (native-speaker listening test, same
+  category as Phases 4–6's pending mic test) — lock the final voice ID per
+  language.
+- Decide whether the added per-utterance latency is acceptable for launch,
+  given it's no longer a drop-in swap — flagged here for that decision, not
+  decided silently.
 
 ## 9. Phase 8 — Lead capture flow
 

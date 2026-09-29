@@ -141,10 +141,12 @@
     right: 28px;
     width: 336px;
     max-width: calc(100vw - 40px);
+    max-height: calc(100vh - 140px);
     background: var(--white);
     border-radius: 22px;
     box-shadow: var(--card-shadow);
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     z-index: 50;
     opacity: 0;
     transform: translateY(16px) scale(0.98);
@@ -627,6 +629,14 @@
   // shares the exact same retrieval + persona logic.
   const RAG_BACKEND_WIDGET_URL = 'http://localhost:8000/widget/chat';
 
+  // Phase 10 (logging): one id per browser tab's chat session, sent with
+  // every /widget/chat call so the backend can group turns into a single
+  // transcript file (rag-backend/conversation_logger.py). Not a privacy-
+  // sensitive identifier — just a random grouping key, never reused across
+  // tabs/reloads since it's only kept in memory.
+  const chatSessionId =
+    (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+
   const chatForm = document.getElementById('chatForm');
   const chatInput = document.getElementById('chatInput');
   const chatLog = document.getElementById('chatLog');
@@ -738,7 +748,7 @@
       const res = await fetch(RAG_BACKEND_WIDGET_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: conversationHistory }),
+        body: JSON.stringify({ messages: conversationHistory, session_id: chatSessionId }),
       });
 
       if (!res.ok) throw new Error(`Backend returned ${res.status}`);
@@ -818,6 +828,7 @@
   let playbackSampleRate = 24000;
   let nextPlayTime = 0;
   let scheduledSources = [];
+  let playbackKeepAliveInterval = null;
   let speakingSilenceTimer = null;
   let currentTurnReplyText = '';
 
@@ -861,25 +872,43 @@
     // error at all, which is exactly what made replies inaudible despite
     // Deepgram/Sarvam confirming audio was generated and sent.
     if (!playbackCtx) return;
-    const int16 = new Int16Array(arrayBuffer);
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x8000;
+    // Chrome (and other browsers) auto-suspend an AudioContext that's been
+    // quiet for a while as a power-saving measure — even one that was
+    // properly resumed on the original click. A silent gap of any kind
+    // (mic-permission dialog, the 1.5-5s language-detection recording
+    // before the greeting even arrives, or just a natural pause in
+    // conversation) can trigger this mid-session, which is what made audio
+    // "hearable, then suddenly not" instead of consistently broken.
+    // resume() on an already-running context is a cheap no-op, so calling
+    // it unconditionally before every chunk is the standard defensive fix.
+    if (playbackCtx.state !== 'running') {
+      console.warn(`ACT AI: playbackCtx.state is "${playbackCtx.state}" when a chunk arrived — resuming.`);
+      playbackCtx.resume();
+    }
+    try {
+      const int16 = new Int16Array(arrayBuffer);
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x8000;
 
-    const audioBuffer = playbackCtx.createBuffer(1, float32.length, playbackSampleRate);
-    audioBuffer.copyToChannel(float32, 0);
+      const audioBuffer = playbackCtx.createBuffer(1, float32.length, playbackSampleRate);
+      audioBuffer.copyToChannel(float32, 0);
 
-    const source = playbackCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(playbackCtx.destination);
-    source.onended = () => {
-      const idx = scheduledSources.indexOf(source);
-      if (idx !== -1) scheduledSources.splice(idx, 1);
-    };
-    scheduledSources.push(source);
+      const source = playbackCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(playbackCtx.destination);
+      source.onended = () => {
+        const idx = scheduledSources.indexOf(source);
+        if (idx !== -1) scheduledSources.splice(idx, 1);
+      };
+      scheduledSources.push(source);
 
-    const startAt = Math.max(nextPlayTime, playbackCtx.currentTime);
-    source.start(startAt);
-    nextPlayTime = startAt + audioBuffer.duration;
+      const startAt = Math.max(nextPlayTime, playbackCtx.currentTime);
+      source.start(startAt);
+      nextPlayTime = startAt + audioBuffer.duration;
+      console.debug(`ACT AI: scheduled ${arrayBuffer.byteLength}B chunk at ctx time ${startAt.toFixed(3)} (ctx.currentTime=${playbackCtx.currentTime.toFixed(3)}, state=${playbackCtx.state})`);
+    } catch (err) {
+      console.error('ACT AI: playPcm16Chunk failed:', err);
+    }
   }
 
   // Barge-in: called when Deepgram reports the user has started speaking
@@ -978,12 +1007,57 @@
     voiceActive = true;
     setTalkButtonState(UI_TEXT[currentLanguage].connecting);
 
+    // Create (and resume) the playback AudioContext HERE, synchronously,
+    // before any `await` — including getUserMedia's permission prompt and
+    // the language-detection recording below. Chrome's autoplay policy only
+    // keeps an AudioContext resumable within the original click's user-
+    // activation window; the mic-permission prompt and, especially, the
+    // ~1.5-5s auto-detect recording (which resolves via an
+    // AudioWorklet/ScriptProcessor callback, NOT the click itself) both fall
+    // outside that window. Creating playbackCtx after those — as this used
+    // to do, right where VOICE_ENDPOINTS' sample rate becomes known — left
+    // it permanently "suspended": source.start() calls succeeded with no
+    // error but played into silence, which is exactly what made replies
+    // inaudible despite the server (confirmed separately) actually streaming
+    // real TTS audio. Both languages use the same 24000Hz playback rate
+    // (VOICE_ENDPOINTS above), so we don't need to know the detected
+    // language yet to pick it correctly.
+    playbackSampleRate = 24000;
+    playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: playbackSampleRate });
+    nextPlayTime = playbackCtx.currentTime;
+    console.debug(`ACT AI: playbackCtx created, initial state="${playbackCtx.state}"`);
+    playbackCtx.resume().then(
+      () => console.debug(`ACT AI: playbackCtx.resume() resolved, state="${playbackCtx.state}"`),
+      (err) => console.error('ACT AI: playbackCtx.resume() rejected:', err)
+    );
+    // Belt-and-suspenders against the browser auto-suspending an idle
+    // context mid-session (see playPcm16Chunk's comment) — a silent gap
+    // during a pause in conversation would otherwise sit suspended until
+    // the next chunk's own resume() call catches it, which is a beat too
+    // late for that chunk. Polling every 2s is cheap and resume() is a
+    // no-op when already running.
+    if (playbackKeepAliveInterval) clearInterval(playbackKeepAliveInterval);
+    playbackKeepAliveInterval = setInterval(() => {
+      if (playbackCtx && playbackCtx.state !== 'running') playbackCtx.resume();
+    }, 2000);
+
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Explicit AEC/noise-suppression constraints (2026-09-29): a real
+      // test session showed the VAD re-triggering "user started speaking"
+      // within milliseconds of every turn ending, cancelling every reply
+      // before it reached TTS (see VAD_TUNING's comment in pipeline.py).
+      // Most browsers default these on already, but making them explicit
+      // rather than relying on the default removes one variable from that
+      // false-trigger picture, alongside the server-side VAD tuning.
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
     } catch (err) {
       statusLine.textContent = 'Microphone permission is needed for voice chat.';
       voiceActive = false;
       setTalkButtonState(UI_TEXT[currentLanguage].talk);
+      if (playbackKeepAliveInterval) { clearInterval(playbackKeepAliveInterval); playbackKeepAliveInterval = null; }
+      if (playbackCtx) { playbackCtx.close(); playbackCtx = null; }
       return;
     }
 
@@ -1010,28 +1084,32 @@
       setTalkButtonState(UI_TEXT[currentLanguage].talk);
       micStream.getTracks().forEach((t) => t.stop());
       micStream = null;
+      if (playbackKeepAliveInterval) { clearInterval(playbackKeepAliveInterval); playbackKeepAliveInterval = null; }
+      if (playbackCtx) { playbackCtx.close(); playbackCtx = null; }
       return;
     }
 
     statusLine.textContent = 'Connecting to ACT AI voice...';
-    playbackSampleRate = endpoint.playbackSampleRate;
-
-    // Create (and explicitly resume) the playback AudioContext HERE — still
-    // within the click handler's async continuation, which browsers still
-    // treat as user-gesture-initiated as long as nothing awaited so far
-    // involved user interaction of its own (getUserMedia's permission
-    // prompt and the detection fetch above both qualify). Creating it later
-    // (e.g. lazily on first incoming audio message, as this used to do)
-    // leaves it "suspended" and every source.start() plays into silence
-    // with no error.
-    playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: playbackSampleRate });
-    nextPlayTime = playbackCtx.currentTime;
-    playbackCtx.resume();
+    // playbackSampleRate/playbackCtx were already set up above, synchronous
+    // with the click — endpoint.playbackSampleRate is asserted to match
+    // (both languages use 24000; see VOICE_ENDPOINTS).
+    if (endpoint.playbackSampleRate !== playbackSampleRate) {
+      console.warn(
+        `ACT AI: ${currentLanguage} voice endpoint expects ${endpoint.playbackSampleRate}Hz playback, ` +
+        `but the AudioContext was already created at ${playbackSampleRate}Hz.`
+      );
+    }
 
     voiceWs = new WebSocket(endpoint.wsUrl);
     voiceWs.binaryType = 'arraybuffer';
 
     voiceWs.onopen = () => {
+      // Re-resume defensively: the mic-permission dialog + detection delay
+      // between creating playbackCtx and getting here can be enough for the
+      // browser to have auto-suspended it already, before the greeting's
+      // first chunk even arrives (see playPcm16Chunk's comment).
+      if (playbackCtx && playbackCtx.state !== 'running') playbackCtx.resume();
+
       // Flush whatever the visitor already said while detection was
       // running, so they don't have to repeat their first sentence.
       for (const chunk of bufferedChunks) voiceWs.send(chunk);
@@ -1114,6 +1192,7 @@
 
   function stopVoiceSession() {
     voiceActive = false;
+    if (playbackKeepAliveInterval) { clearInterval(playbackKeepAliveInterval); playbackKeepAliveInterval = null; }
     if (micProcessor) { micProcessor.disconnect(); micProcessor.onaudioprocess = null; micProcessor = null; }
     if (micSource) { micSource.disconnect(); micSource = null; }
     if (micAudioCtx) { micAudioCtx.close(); micAudioCtx = null; }
