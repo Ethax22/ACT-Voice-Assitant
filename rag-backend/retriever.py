@@ -29,6 +29,7 @@ embedding call would silently fail. Lazy init keeps everything on one loop.
 """
 import asyncio
 import os
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,7 @@ from data_loader import load_all_data
 KNOWLEDGE_BASE_DIR = Path(__file__).parent / "knowledge_base"
 CHUNK_TOKENS = 500
 CHUNK_OVERLAP_TOKENS = 50
+QUERY_CACHE_SIZE = 256
 
 _encoding = tiktoken.get_encoding("cl100k_base")
 
@@ -69,6 +71,7 @@ class Retriever:
         )
         self._chunks: list[str] = []
         self._embeddings: np.ndarray | None = None
+        self._query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._ingest_lock = asyncio.Lock()
         self._ingested = False
 
@@ -113,13 +116,33 @@ class Retriever:
             self._ingested = True
         return len(self._chunks)
 
+    async def _embed_query(self, query: str) -> np.ndarray:
+        """Embed one query, remembering recent ones: the Azure round-trip is
+        ~0.3-0.45s of every voice turn, and repeated or re-used queries
+        (see main._retrieval_query) skip it entirely. Cleared on reload only
+        by being keyed to the same embedding model, so it never goes stale."""
+        key = query.strip().lower()
+        cached = self._query_cache.get(key)
+        if cached is not None:
+            self._query_cache.move_to_end(key)
+            return cached
+        vec = (await self._embed([query]))[0]
+        self._query_cache[key] = vec
+        if len(self._query_cache) > QUERY_CACHE_SIZE:
+            self._query_cache.popitem(last=False)
+        return vec
+
+    async def warm_up(self):
+        """Ingest now instead of on the first visitor's request."""
+        await self._ensure_ingested()
+
     async def search(self, query: str, top_k: int = 4) -> str:
         await self._ensure_ingested()
 
         if not self._chunks or self._embeddings is None:
             return "No matching context found."
 
-        query_vec = (await self._embed([query]))[0]
+        query_vec = await self._embed_query(query)
         scores = self._embeddings @ query_vec
         top_indices = np.argsort(-scores)[:top_k]
         return "\n\n---\n\n".join(self._chunks[i] for i in top_indices)

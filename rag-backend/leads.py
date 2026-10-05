@@ -7,6 +7,7 @@ Swapping the destination later stays isolated to this file.
 """
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import gspread
@@ -65,6 +66,17 @@ def _get_worksheet():
         _worksheet = None
 
     return _worksheet
+
+
+def normalize_indian_mobile(raw: str) -> str | None:
+    """Return a clean 10-digit Indian mobile number, or None if `raw` isn't
+    one. Accepts spaces/dashes and a leading +91, 91 or 0."""
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits if re.fullmatch(r"[6-9]\d{9}", digits) else None
 
 
 def save_lead(
