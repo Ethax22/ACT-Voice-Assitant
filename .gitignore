@@ -1,6 +1,10 @@
 __pycache__/
 .env
 *.pyc
+
+# Google service account keys — full write access to the leads Sheet, never commit
+rag-backend/secrets/
+*service-account*.json
 venv/
 .venv/
 *.log

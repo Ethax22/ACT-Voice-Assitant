@@ -7,7 +7,7 @@ Swapping the destination later stays isolated to this file.
 """
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -17,6 +17,11 @@ logger = logging.getLogger("rag_backend.leads")
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _SHEET_ID = os.environ.get("LEADS_SHEET_ID")
 _CREDS_PATH = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+
+# Fixed offset rather than zoneinfo("Asia/Kolkata"): IST has no DST, and this
+# avoids needing the tzdata package on Windows hosts. Lead timestamps are IST
+# because admissions staff read the sheet directly; conversation logs stay UTC.
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 _worksheet = None
 _init_attempted = False
@@ -47,7 +52,7 @@ def _get_worksheet():
         header = worksheet.row_values(1)
         if not header:
             worksheet.append_row(
-                ["timestamp_utc", "name", "phone", "email", "preferred_course", "language", "source"]
+                ["timestamp_ist", "name", "phone", "email", "preferred_course", "language", "source"]
             )
         _worksheet = worksheet
     except Exception:
@@ -73,7 +78,7 @@ def save_lead(
     """Append one captured lead as a row. Returns whether it reached Sheets
     (a False here still means the lead was logged — check the logs)."""
     row = [
-        datetime.now(timezone.utc).isoformat(),
+        datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S"),
         name,
         phone,
         email or "",
