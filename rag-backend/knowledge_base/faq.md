@@ -21,10 +21,10 @@ A: Yes, separate hostels for boys and girls, with rooms typically shared by
 admissions.
 
 **Q: What is the placement record like?**
-A: In 2025, 148 recruiters visited campus offering 523 offers, with 319
-students placed. Top recruiters include TCS, Infosys, Cognizant, Capgemini,
-Zoho, Hitachi, and Cisco. Package figures vary by source — check with the
-placement cell for verified current numbers.
+A: In the 2024-25 season, about 174 companies recruited, giving 424 offers and
+319 students placed (88% of those registered). Average package was 4.25 LPA and
+the highest 9 LPA. Top recruiters include TCS, Infosys, Wipro, Cognizant,
+Accenture, Zoho, and Cisco. Check with the placement cell for the latest numbers.
 
 **Q: Where is ACT located?**
 A: Old Mahabalipuram Road (OMR), Thalambur, Chennai 600130, Tamil Nadu.

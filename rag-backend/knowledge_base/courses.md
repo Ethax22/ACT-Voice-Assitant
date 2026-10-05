@@ -20,7 +20,16 @@ Mechatronics Engineering — confirm current active PG intake with admissions,
 as PG offerings can vary by year.)
 
 ## Doctoral Programs
-- Ph.D. research centres across multiple engineering disciplines
+- Ph.D. research in Electrical & Electronics, Electronics & Communication, and
+  Mechanical Engineering
+
+## Department notes (official site)
+- **ECE:** established 2001 (initial intake 60); about 720 UG and 36 PG students;
+  NBA accredited since 2009. Facilities: Electronics Hobby Centre, e-Yantra Lab
+  (MHRD funded), Sir C.V. Raman Centre for Innovation.
+- **CSE:** labs for mobile app development, AI and deep learning.
+- HOD names, faculty counts and per-department intake are not published on the
+  site — don't state them.
 
 ## Accreditation Notes
 - ECE, EEE, and CSE hold NBA (National Board of Accreditation) status at the
