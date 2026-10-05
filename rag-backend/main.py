@@ -431,6 +431,32 @@ async def widget_chat(payload: WidgetChatRequest):
     return {"reply": reply}
 
 
+class CallingAgentAskRequest(BaseModel):
+    question: str
+
+
+@app.post("/calling-agent/ask")
+async def calling_agent_ask(payload: CallingAgentAskRequest, request: Request):
+    """Sarvam Indus Tool endpoint for the Calling Agent (see
+    docs/Calling_Agent_Build_Plan.md §4.1's `get_act_answer` tool).
+    Bearer-auth required, same key as /v1/chat/completions.
+
+    Deliberately single-turn, with no call-ID/session tracking: Indus's own
+    agent already holds the full call's conversation memory and is
+    instructed to always pass a fully self-contained question (pronouns/
+    references resolved) rather than relying on this endpoint to remember
+    prior turns — see the persona Instructions draft in the build plan for
+    the exact wording. This keeps the endpoint simple while the actual
+    answer still comes from the same retrieval + persona + capture_lead
+    logic every other input path uses (_generate_reply), so phone answers
+    stay consistent with typed chat and voice."""
+    _check_auth(request)
+    if not payload.question.strip():
+        raise HTTPException(status_code=400, detail="question must not be empty")
+    response = await _generate_reply(
+        [{"role": "user", "content": payload.question}], source="phone"
+    )
+    return {"reply": response.choices[0].message.content}
 
 
 @app.post("/admin/reload-knowledge")
