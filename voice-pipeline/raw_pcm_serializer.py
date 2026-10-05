@@ -6,8 +6,21 @@ a specific vendor wire format. Our widget talks a much simpler protocol
 (binary PCM16 in, binary PCM16 out — the same minimal scheme used by the
 English /voice/en relay), so FastAPIWebsocketTransport needs this instead of
 `serializer=None`, which silently discards every incoming message.
+
+2026-09-29: also forwards `OutputTransportMessageFrame` as a JSON text
+message — added so `conversation_router.py` can tell the browser which
+topic it just switched the voice to, for the topic-avatar "speaking" glow
+(widget/index.html's `setActiveTopic`/`setSpeakingTopic`). That glow used
+to be driven by Deepgram's `ConversationText` JSON events; the Sarvam
+pipeline never sent any JSON at all before this (binary audio only), which
+is why the glow silently stopped working when English moved off Deepgram —
+not a regression in the glow code itself, just its one input source
+disappearing. Binary audio frames are unaffected; this is a second,
+independent case in the same serializer, not a replacement.
 """
-from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
+import json
+
+from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame, OutputTransportMessageFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
@@ -19,6 +32,8 @@ class RawPCMSerializer(FrameSerializer):
     async def serialize(self, frame: Frame):
         if isinstance(frame, OutputAudioRawFrame):
             return frame.audio
+        if isinstance(frame, OutputTransportMessageFrame):
+            return json.dumps(frame.message)
         return None
 
     async def deserialize(self, data):

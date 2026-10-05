@@ -169,29 +169,6 @@
     justify-content: space-between;
   }
 
-  .lang-toggle {
-    display: flex;
-    background: rgba(255,255,255,0.12);
-    border-radius: 999px;
-    padding: 2px;
-  }
-  .lang-btn {
-    border: none;
-    background: transparent;
-    color: rgba(255,255,255,0.75);
-    font-family: 'Inter', sans-serif;
-    font-size: 11.5px;
-    font-weight: 600;
-    padding: 5px 10px;
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-  }
-  .lang-btn.active {
-    background: var(--gold);
-    color: var(--navy);
-  }
-
   .widget-header .brand {
     display: flex;
     align-items: center;
@@ -457,10 +434,6 @@
         <h2>ACT AI</h2>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
-        <div class="lang-toggle" id="langToggle" role="group" aria-label="Choose language">
-          <button type="button" class="lang-btn active" data-lang="en">EN</button>
-          <button type="button" class="lang-btn" data-lang="ta">தமிழ்</button>
-        </div>
         <button class="collapse-btn" id="collapseBtn" aria-label="Collapse">
           <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
             <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
@@ -642,15 +615,15 @@
   const chatLog = document.getElementById('chatLog');
   const sendBtn = document.getElementById('sendBtn');
 
-  // Language auto-detects by default (CLAUDE.md decision #5, updated
-  // 2026-09-23 — superseding the original explicit-picker-only design): typed
-  // chat detects Tamil vs. English from the input text's script, voice
-  // detects it from a short initial mic snippet sent to voice-pipeline's
-  // /detect-language (Phase 6). The toggle buttons are a manual override,
-  // not the primary path — once the visitor clicks one, auto-detect stops
-  // overriding their choice for the rest of the session.
+  // Language is fully automatic (CLAUDE.md decision #5, updated 2026-09-23
+  // for auto-detect-by-default, then 2026-09-29 to drop the manual toggle
+  // entirely once auto-detect proved reliable enough on its own): typed
+  // chat detects Tamil vs. English from the input text's script; voice
+  // detects it from a short initial mic snippet at call start, AND
+  // continuously re-detects per turn mid-call (voice-pipeline's
+  // ConversationRouter.maybe_auto_switch_language), so switching languages
+  // mid-conversation just means starting to speak the other one.
   let currentLanguage = 'en';
-  let languageManuallySet = false;
 
   // Tamil script lives in the U+0B80–U+0BFF Unicode block. A single Tamil
   // character in an otherwise-English message is enough to treat the whole
@@ -682,11 +655,16 @@
   UI_TEXT.en.connecting = 'Connecting…';
   UI_TEXT.en.endCall = 'End Call';
 
-  const langToggle = document.getElementById('langToggle');
   const promptLabel = document.getElementById('promptLabel');
   const dividerLabelSpan = document.getElementById('dividerLabel').querySelector('span');
   const talkBtnLabel = document.getElementById('talkBtnLabel');
 
+  // Language is fully automatic now (2026-09-29) — the manual EN/தமிழ்
+  // toggle was removed once auto-detect (typed: script detection; voice:
+  // Sarvam batch STT, both at call start AND per-turn mid-call via
+  // voice-pipeline's ConversationRouter.maybe_auto_switch_language) proved
+  // reliable enough on its own. applyLanguage() only updates UI text now —
+  // it no longer has a toggle to keep in sync with.
   function applyLanguage(lang) {
     currentLanguage = lang;
     const t = UI_TEXT[lang];
@@ -695,24 +673,11 @@
     chatInput.placeholder = t.placeholder;
     if (!voiceActive) talkBtnLabel.textContent = t.talk;
 
-    langToggle.querySelectorAll('.lang-btn').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.lang === lang);
-    });
-
     topicCards.forEach((card) => {
       const span = card.querySelector('span');
       span.textContent = lang === 'en' ? span.dataset.labelEn : span.dataset.labelTa;
     });
   }
-
-  langToggle.addEventListener('click', (e) => {
-    const btn = e.target.closest('.lang-btn');
-    if (!btn) return;
-    languageManuallySet = true; // stop auto-detect from overriding an explicit choice
-    if (btn.dataset.lang === currentLanguage) return;
-    if (voiceActive) stopVoiceSession(); // switching language mid-call would talk to the wrong pipeline
-    applyLanguage(btn.dataset.lang);
-  });
 
   // Keep the full conversation here — sending only the latest message would
   // make follow-ups like "what about ECE?" lose their context.
@@ -730,14 +695,11 @@
     if (!message) return;
 
     // Auto-detect (Phase 6): a typed message's script decides the UI
-    // language for this and future turns, unless the visitor has already
-    // picked one via the toggle. A topic-card click sends fixed starter text
-    // in whatever language is already active, so it never itself changes
-    // detection — only a visitor's own typed words do.
-    if (!languageManuallySet) {
-      const detected = detectScriptLanguage(message);
-      if (detected !== currentLanguage) applyLanguage(detected);
-    }
+    // language for this and future turns. A topic-card click sends fixed
+    // starter text in whatever language is already active, so it never
+    // itself changes detection — only a visitor's own typed words do.
+    const detected = detectScriptLanguage(message);
+    if (detected !== currentLanguage) applyLanguage(detected);
 
     addBubble(message, 'user');
     conversationHistory.push({ role: 'user', content: message });
@@ -1063,17 +1025,15 @@
 
     // Auto-detect (Phase 6): buffer a short snippet and identify its
     // language BEFORE opening a pipeline, since which pipeline to open
-    // (persona, TTS voice, everything) depends on the answer. Skipped
-    // entirely once the visitor has picked a language via the toggle —
-    // manual choice always wins, per CLAUDE.md decision #5.
-    let bufferedChunks = [];
-    if (!languageManuallySet) {
-      statusLine.textContent = 'Detecting language…';
-      const { language, chunks } = await recordSnippetForDetection(micStream);
-      if (!voiceActive) return; // cancelled (End Call) while detection was in flight
-      bufferedChunks = chunks;
-      if (language && language !== currentLanguage) applyLanguage(language);
-    }
+    // (persona, TTS voice, everything) depends on the answer. This is only
+    // the STARTING language now — voice-pipeline's ConversationRouter
+    // keeps re-detecting per turn once the call is open, so a wrong first
+    // guess (or the visitor switching languages mid-call) self-corrects
+    // without the visitor doing anything.
+    statusLine.textContent = 'Detecting language…';
+    const { language, chunks: bufferedChunks } = await recordSnippetForDetection(micStream);
+    if (!voiceActive) return; // cancelled (End Call) while detection was in flight
+    if (language && language !== currentLanguage) applyLanguage(language);
 
     const endpoint = VOICE_ENDPOINTS[currentLanguage];
     if (!endpoint) {
@@ -1159,6 +1119,17 @@
             statusLine.textContent = 'Listening...';
           } else if (msg.type === 'AgentThinking') {
             statusLine.textContent = 'ACT AI is thinking...';
+          } else if (msg.type === 'topic' && msg.topic) {
+            // Sent by voice-pipeline's ConversationRouter (2026-09-29) —
+            // the server-side counterpart to classifyCategory below, since
+            // the server (not the browser) now has the visitor's actual
+            // question text and already classifies it to pick the reply's
+            // TTS voice. This is the ONLY source of topic-glow updates
+            // during a voice call now: the ConversationText branch above is
+            // dead code path for the current Sarvam pipeline (kept for
+            // documentation/history — see raw_pcm_serializer.py's
+            // docstring — nothing sends that message shape anymore).
+            setActiveTopic(msg.topic);
           }
         } catch (e) {
           // non-JSON control frame — ignore

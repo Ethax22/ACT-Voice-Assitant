@@ -8,11 +8,13 @@ favor of this same Sarvam/Pipecat pipeline for both languages.
 
 Model choices (Sept 2026, latest per docs.sarvam.ai — see
 docs/Voice_Model_Choices.md for rationale):
-- STT: SarvamRealtimeSTTService always uses "saaras:v3-realtime" internally
-  (hardcoded in Pipecat) but its `language_code` setting IS configurable per
-  language — confirmed by reading Pipecat 1.10.0's actual installed source
-  (pipecat/services/sarvam/stt.py), not just its docs. "saaras:v4" was never
-  applicable to the realtime service; nothing to configure there.
+- STT: saaras:v4 (Sarvam's current default/recommended), same model as
+  language_detection.py's batch call so one model serves both. Pipecat 1.12.0's
+  SarvamRealtimeSTTService accepts it via Settings(model=...) — it defaults to
+  "saaras:v3-realtime" otherwise (older Pipecat 1.10.0 hardcoded that; see
+  pipecat/services/sarvam/stt.py `_SUPPORTED_REALTIME_MODELS`). Note the name
+  is "saaras:v4", NOT "saaras:v4-realtime", which the endpoint rejects.
+  `language_code` is configured per language.
 - TTS: bulbul:v3 (bulbul:v2 is deprecated — Sarvam's API now rejects it)
 """
 import os
@@ -112,6 +114,7 @@ VAD_TUNING = {
 }
 
 # Model choices — see docs/Voice_Model_Choices.md.
+STT_MODEL = "saaras:v4"
 TTS_MODEL = "bulbul:v3"
 # Placeholder picks — verify by ear against real ACT answers (Phase 5's
 # native-speaker listening test) before locking in, same as the original
@@ -202,6 +205,8 @@ def build_pipeline(websocket, language: Language, session_id: str):
 
     from conversation_logger import TranscriptLogger, save_session_audio
     from conversation_router import ConversationRouter, ConversationRouterCallbacks, TOPIC_VOICES
+    from language_detection import detect_language
+    from latency_metrics import LatencyLogger
     from raw_pcm_serializer import RawPCMSerializer
 
     sarvam_api_key = os.environ["SARVAM_API_KEY"]
@@ -236,6 +241,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
         api_key=sarvam_api_key,
         prefix_padding_ms=VAD_TUNING["prefix_padding_ms"],
         settings=SarvamRealtimeSTTService.Settings(
+            model=STT_MODEL,
             language_code=language_code,
             threshold=VAD_TUNING["threshold"],
             silence_duration_ms=VAD_TUNING["silence_duration_ms"],
@@ -269,6 +275,21 @@ def build_pipeline(websocket, language: Language, session_id: str):
             model=TTS_MODEL,
             voice=TOPIC_VOICES[language]["about-us"],
             language=language_code,
+            # Reported "robotic from the start" (2026-09-29) — we'd never
+            # set these, so they were sitting on Sarvam's own lowest-latency
+            # defaults (min_buffer_size=50, max_chunk_length=150). Sarvam's
+            # docs (docs.sarvam.ai, checked live, not assumed) confirm both
+            # trade latency for naturalness: min_buffer_size "balances
+            # latency with natural sentence completion," and Pipecat's own
+            # installed docstring for it says plainly "lower values reduce
+            # latency but may affect quality." Raised toward the middle of
+            # each documented range (30-200 / 50-500) rather than maxed out,
+            # to trade some latency for smoother prosody without making the
+            # reply's first words take too long to start. This is a
+            # reasoned experiment, not a verified fix — needs a real listen
+            # to confirm, same as the VAD tuning.
+            min_buffer_size=120,
+            max_chunk_length=300,
         ),
     )
 
@@ -351,11 +372,30 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # means "record continuously, flush once" rather than periodic chunked
     # flushes — appropriate for a single whole-call transcript file, not a
     # live streaming use case.
-    audio_logger = AudioBufferProcessor(num_channels=1, buffer_size=0, auto_start_recording=True)
+    #
+    # enable_turn_audio=True added 2026-09-29 for automatic mid-call
+    # language switching: PipelineWorker enables turn tracking by default
+    # (enable_turn_tracking=True), so this alone is enough to get a
+    # per-user-turn on_user_turn_audio event with that turn's raw PCM,
+    # which the handler below re-runs through the SAME reliable batch
+    # detector language_detection.py already uses once at call start
+    # (realtime STT's own "auto" mode was tested and found unreliable —
+    # see that module's docstring). Replaces requiring a spoken "switch to
+    # Tamil" phrase with the visitor just naturally speaking the other
+    # language — reacts within about one turn, not instantly, since
+    # detection is itself a real API call (~0.6-0.8s).
+    audio_logger = AudioBufferProcessor(
+        num_channels=1, buffer_size=0, auto_start_recording=True, enable_turn_audio=True
+    )
 
     @audio_logger.event_handler("on_audio_data")
     async def _on_audio_data(processor, audio, sample_rate, num_channels):
         save_session_audio(session_id, audio, sample_rate, num_channels)
+
+    @audio_logger.event_handler("on_user_turn_audio")
+    async def _on_user_turn_audio(processor, turn_audio):
+        detected = await detect_language(turn_audio.audio, turn_audio.sample_rate)
+        await router.maybe_auto_switch_language(detected)
 
     transcript_logger = TranscriptLogger(
         context, session_id=session_id, language=lambda: router.language
@@ -373,6 +413,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
             audio_logger,
             assistant_aggregator,
             transcript_logger,
+            LatencyLogger(session_id),
         ]
     )
 
@@ -381,7 +422,11 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # decorates PipelineTask with @deprecated) — same category of fix as the
     # LLMContext migration above, keeping this off Pipecat's deprecated path
     # rather than carrying a stale import forward.
-    worker = PipelineWorker(pipeline, params=PipelineParams(allow_interruptions=True))
+    # enable_metrics: each service reports its time-to-first-byte (see
+    # latency_metrics.py, which logs them) — measurement only, no behaviour change.
+    worker = PipelineWorker(
+        pipeline, params=PipelineParams(allow_interruptions=True, enable_metrics=True)
+    )
 
     # Greeting (Phase 5): speaks GREETINGS[language] immediately once the
     # browser's WebSocket connects, going straight to TTS rather than

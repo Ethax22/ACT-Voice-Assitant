@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMUpdateSettingsFrame,
     ManuallySwitchServiceFrame,
+    OutputTransportMessageFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
     TTSUpdateSettingsFrame,
@@ -62,18 +63,24 @@ Topic = Literal["about-us", "admissions", "courses", "placements"]
 # Tamil-only, so the same four names work for both languages; only the
 # language-appropriate default (priya/kavya) differs, matching what was
 # already locked in per language before this change.
+#
+# Gender assignment matches the widget's own avatar images per topic
+# (widget/index.html's topic cards: About Us and Placements show a woman,
+# Courses and Admissions show a man) — corrected 2026-09-29 after the
+# initial pick didn't match those images (admissions/courses had swapped
+# genders from what the UI shows).
 TOPIC_VOICES: dict[Language, dict[Topic, str]] = {
     "en": {
-        "about-us": "priya",
-        "admissions": "rahul",
-        "courses": "pooja",
-        "placements": "rohan",
+        "about-us": "ritu",
+        "courses": "aayan",
+        "admissions": "sunny",
+        "placements": "shreya",
     },
     "ta": {
-        "about-us": "kavya",
-        "admissions": "rahul",
-        "courses": "pooja",
-        "placements": "rohan",
+        "about-us": "ritu",
+        "courses": "aayan",
+        "admissions": "sunny",
+        "placements": "shreya",
     },
 }
 
@@ -251,6 +258,7 @@ class ConversationRouter(FrameProcessor):
                 FrameDirection.DOWNSTREAM,
             )
             logger.debug(f"ConversationRouter: topic={category!r} -> cloned voice ({self._language})")
+            await self._notify_client_topic(category)
             return
 
         voice = TOPIC_VOICES[self._language][category]
@@ -270,6 +278,22 @@ class ConversationRouter(FrameProcessor):
             FrameDirection.DOWNSTREAM,
         )
         logger.debug(f"ConversationRouter: topic={category!r} -> stock voice={voice!r} ({self._language})")
+        await self._notify_client_topic(category)
+
+    async def _notify_client_topic(self, category: Topic):
+        """Tells the browser which topic the upcoming reply is about, so
+        widget/index.html's setActiveTopic/setSpeakingTopic can drive the
+        avatar "speaking" glow — dead in voice mode until this was added
+        (module import comment / raw_pcm_serializer.py's docstring explain
+        why: no JSON ever reached the browser from the Sarvam pipeline
+        before this). Travels through llm and tts like any other downstream
+        frame (both forward frames they don't specifically handle) before
+        reaching transport.output(), where RawPCMSerializer turns it into a
+        JSON text WebSocket message."""
+        await self.push_frame(
+            OutputTransportMessageFrame(message={"type": "topic", "topic": category}),
+            FrameDirection.DOWNSTREAM,
+        )
 
     async def _handle_transcript(self, text: str):
         switch_target = detect_language_switch(text)
@@ -279,6 +303,23 @@ class ConversationRouter(FrameProcessor):
 
         category = classify_category(text, self._language) or "about-us"
         await self._activate_topic_voice(category)
+
+    async def maybe_auto_switch_language(self, detected: Language | None):
+        """2026-09-29: called from pipeline.py, NOT from process_frame — the
+        caller re-runs Sarvam's batch language detector (the same one
+        language_detection.py already uses once, before a call even opens,
+        because realtime STT can't reliably tell en from ta on its own —
+        confirmed live, see that module's docstring) on each finished user
+        turn's audio, via AudioBufferProcessor's on_user_turn_audio event.
+        This is the automatic replacement for requiring a spoken "switch to
+        Tamil" — the visitor just starts talking in the other language and
+        it catches up within roughly one turn (detection + a real API call
+        takes a beat; it can't be instant mid-sentence). `detected` is
+        already None-if-low-confidence (language_detection.py's own
+        MIN_CONFIDENCE gate), so this only switches on a real signal, not a
+        coin flip."""
+        if detected and detected != self._language:
+            await self._switch_language(detected)
 
     async def _switch_language(self, target: Language):
         logger.info(f"ConversationRouter: switching language {self._language!r} -> {target!r}")
