@@ -1,4 +1,4 @@
-# Implementation Plan: ACT AI Voice Assistant (Sarvam-Unified Path)
+# Implementation Plan: Agni AI Voice Assistant (Sarvam-Unified Path)
 
 **Companion to:** PRD_API_Based_Voice_Assistant
 **Author:** Prakash D (Ethax)
@@ -350,7 +350,7 @@ Decided 2026-09-26: **local disk, 90-day retention.**
 - [ ] Known sensitive questions answered via approved talking points
 - [ ] Every conversation logged to local disk (transcript + audio), auto-pruned after 90 days
 - [ ] No API keys exposed in browser-side code
-- [ ] Widget matches ACT AI branding, no third-party "Powered by" attribution
+- [ ] Widget matches Agni AI branding, no third-party "Powered by" attribution
 - [ ] Deployed and reachable at a real, stable URL
 
 ## 16. Decisions log (resolved 2026-09-26 — no open questions remain)

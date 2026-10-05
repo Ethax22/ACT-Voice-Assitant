@@ -1,6 +1,6 @@
 # ACT Voice Assistant
 
-Building an AI voice + chat assistant for Agni College of Technology's website — a floating widget ("ACT AI") that answers visitor questions about admissions, courses, placements, and campus life, in English and Tamil, by voice or typed text.
+Building an AI voice + chat assistant for Agni College of Technology's website — a floating widget ("Agni AI") that answers visitor questions about admissions, courses, placements, and campus life, in English and Tamil, by voice or typed text.
 
 **Full build spec:** @docs/Implementation_Plan_API_Based.md
 **Architecture rationale (read for the "why" behind any decision below):** docs/PRD_API_Based_Voice_Assistant.md
@@ -14,11 +14,11 @@ These were already decided across prior planning sessions. If a build step seems
 1. **Compose-it-ourselves, not a bundled vendor agent — both languages now on Sarvam.** Updated 2026-09-25, superseding the original split: both English and Tamil are assembled from Sarvam's Saaras (STT) + Bulbul (TTS) via Pipecat — not Sarvam's bundled Samvaad product. Originally English ran on Deepgram's Voice Agent API (Flux STT/TTS) specifically for its built-in turn-taking/interruption handling, composed via a custom LLM endpoint; that's been dropped in favor of one shared voice vendor across both languages. Known tradeoff, accepted deliberately: the English path loses Deepgram's built-in turn-taking and must now replicate it manually via Pipecat, same as Tamil already does. Working Deepgram code (`rag-backend/voice_agent.py`) predates this change and needs retiring/replacing, not just leaving in place unused.
 2. **One shared RAG backend answers all three input paths**: typed chat, English voice, and Tamil voice all call the same FastAPI backend's `/v1/chat/completions` endpoint. Never let a language or input mode fork onto its own separate LLM/knowledge base — that's the one thing this whole architecture is designed to avoid.
 3. **The RAG backend must be stateful across a conversation** — pass the full message history on every call, not just the latest turn. A version that only reads `messages[-1]` is a regression, not a simplification.
-4. **The system prompt must carry a persona** ("ACT AI" — warm, brief, conversational — see the prompt template in the Implementation Plan). Don't strip this down to a bare "answer from context" instruction; that's what makes it feel robotic.
+4. **The system prompt must carry a persona** ("Agni AI" — warm, brief, conversational — see the prompt template in the Implementation Plan). Don't strip this down to a bare "answer from context" instruction; that's what makes it feel robotic.
 5. **Language is auto-detected** — updated 2026-09-23, superseding the original v1 decision (explicit EN/Tamil picker, no auto-detect). Typed chat detects Tamil vs. English directly from the input text's script; voice detects language from a short initial audio snippet before routing the session into the Sarvam/Pipecat pipeline configured for that language (see decision #1 — both languages share the same voice vendor now, just different STT/TTS language settings). Keep a manual override in the widget UI as a fallback, but auto-detect is the default path now, not the picker.
 6. **The LLM is Sarvam 105B**, not OpenAI. Updated 2026-09-25, superseding the original OpenAI decision (which was funded via Microsoft for Startups credits — those credits go unused under this change; flag to Prakash if that matters before deployment, don't silently absorb the cost shift). Switched after a benchmark/cost comparison: Sarvam 105B scored competitively with or ahead of GPT-4.1-mini and GPT-5-mini on general benchmarks (MMLU, MMLU Pro, GPQA Diamond) and dominated Indic-language benchmarks (~90% win rate vs. frontier English-centric models), at output pricing below gpt-4.1-mini's. Note Sarvam's benchmark numbers are self-reported — validate with the real ACT test-question set (Implementation Plan §6) before treating this as final, same scrutiny any vendor's own numbers deserve. `rag-backend/main.py`'s `AsyncAzureOpenAI` client is now stale and needs replacing with a Sarvam chat-completions client — but **embeddings stay on Azure OpenAI** (decided 2026-09-26, Sarvam has no public embeddings API yet): `retriever.py` has its own separate `AsyncAzureOpenAI` client for embeddings that this migration does not touch. Only `AZURE_OPENAI_DEPLOYMENT` (the chat deployment name) becomes stale; `AZURE_OPENAI_API_KEY`/`ENDPOINT`/`API_VERSION`/`EMBEDDING_DEPLOYMENT` stay.
 7. **No vendor API keys (Sarvam) ever touch browser-side JavaScript.** Everything routes through the FastAPI backend, which holds the keys server-side.
-8. **Branding:** the widget is "ACT AI." No third-party "Powered by" attribution anywhere in the UI.
+8. **Branding:** the widget is "Agni AI" (renamed from "ACT AI" on 2026-10-05 at Prakash's request). No third-party "Powered by" attribution anywhere in the UI.
 
 ## Additional v1 must-haves (added 2026-09-22, from the Website Voice Bot doc)
 
@@ -46,7 +46,7 @@ ACT-Voice-Assistant/
 ├── voice-pipeline/       # renamed from tamil-voice-pipeline/ once generalized (Implementation
                            # Plan phase 3) — one Pipecat service serving BOTH languages
                            # (Sarvam STT + RAG backend + Sarvam TTS), parameterized by language
-└── widget/               # One-page site + ACT AI widget (starting point already exists —
+└── widget/               # One-page site + Agni AI widget (starting point already exists —
                            # ask Prakash for the current act-ai-widget.html if not yet copied in)
 ```
 

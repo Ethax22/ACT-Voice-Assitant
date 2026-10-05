@@ -1,20 +1,20 @@
 # Frequently Asked Questions
 
-**Q: Is ACT affiliated with Anna University?**
-A: Yes, ACT is an autonomous institution affiliated with Anna University.
+**Q: Is Agni affiliated with Anna University?**
+A: Yes, Agni is an autonomous institution affiliated with Anna University.
 
-**Q: Is ACT NAAC accredited?**
-A: Yes, ACT holds NAAC A+ accreditation.
+**Q: Is Agni NAAC accredited?**
+A: Yes, Agni holds NAAC A+ accreditation.
 
 **Q: Which departments are NBA accredited?**
 A: ECE, EEE, and CSE hold NBA accreditation at the UG level.
 
-**Q: How do I apply for a UG engineering seat at ACT?**
+**Q: How do I apply for a UG engineering seat at Agni?**
 A: Through TNEA counselling (counselling code 1316), based on Class 12 cutoff
 marks. Contact the admissions hotline (044-67409444 / 044-67409445) for
 management quota queries.
 
-**Q: Does ACT have hostel facilities?**
+**Q: Does Agni have hostel facilities?**
 A: Yes, separate hostels for boys and girls, with rooms typically shared by
 4 students, Wi-Fi, 24/7 hot water, and mess facilities. Annual hostel fee
 (with mess) is approximately Rs 70,000 — confirm the current figure with
@@ -26,7 +26,7 @@ A: In the 2024-25 season, about 174 companies recruited, giving 424 offers and
 the highest 9 LPA. Top recruiters include TCS, Infosys, Wipro, Cognizant,
 Accenture, Zoho, and Cisco. Check with the placement cell for the latest numbers.
 
-**Q: Where is ACT located?**
+**Q: Where is Agni located?**
 A: Old Mahabalipuram Road (OMR), Thalambur, Chennai 600130, Tamil Nadu.
 
 **Q: How can I contact the college?**

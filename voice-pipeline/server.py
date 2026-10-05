@@ -23,7 +23,7 @@ from conversation_logger import prune_old_logs
 from language_detection import detect_language
 from pipeline import build_pipeline
 
-app = FastAPI(title="ACT AI Voice Pipeline")
+app = FastAPI(title="Agni AI Voice Pipeline")
 
 
 @app.on_event("startup")

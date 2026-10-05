@@ -1,6 +1,6 @@
-# About Agni College of Technology (ACT)
+# About Agni College of Technology
 
-Agni College of Technology (ACT) is a NAAC A+ accredited, autonomous engineering
+Agni College of Technology is a NAAC A+ accredited, autonomous engineering
 institution on Old Mahabalipuram Road (OMR), Thalambur, Chennai 600130,
 Tamil Nadu (about 20 km from Adyar, on the IT Highway). Affiliated to Anna
 University, approved by AICTE, ISO 9001:2015 certified. It holds 2(f), 12(B)
@@ -44,7 +44,7 @@ with values.
   incubatees. Example student startups: Deep Fake Shield, AI-powered
   attendance system, dual-purpose BCI headset, eco-friendly biofilm.
 - Centre for R&D supports funded projects, publications and consultancy.
-- Garuda Aerospace (drone startup) came out of the ACT ecosystem.
+- Garuda Aerospace (drone startup) came out of the Agni ecosystem.
 
 ## Contact
 - **Main phone:** 044-49972900

@@ -67,6 +67,21 @@ async def detect_language(pcm16_audio: bytes, sample_rate: int = 16000) -> str |
     None as "fall back to the default language" per the Implementation
     Plan's own guidance to fall back gracefully rather than force a guess.
     """
+    language, _ = await detect_language_and_transcript(pcm16_audio, sample_rate)
+    return language
+
+
+async def detect_language_and_transcript(
+    pcm16_audio: bytes, sample_rate: int = 16000
+) -> tuple[str | None, str | None]:
+    """Same batch call as detect_language, but also returns the transcript.
+
+    2026-10-05: the voice pipeline needs the transcript too — realtime STT is
+    locked to one language, so Tamil speech arrives as transliterated English
+    when the call is on `en`. The batch result (language_code=unknown) is
+    transcribed in the language actually spoken, so it replaces the realtime
+    text on a language switch.
+    """
     sarvam_api_key = os.environ["SARVAM_API_KEY"]
     wav_bytes = _pcm16_to_wav(pcm16_audio, sample_rate)
 
@@ -81,16 +96,16 @@ async def detect_language(pcm16_audio: bytes, sample_rate: int = 16000) -> str |
             "https://api.sarvam.ai/speech-to-text", data=form, headers=headers
         ) as response:
             if response.status != 200:
-                return None
+                return None, None
             data = await response.json()
 
     language_code = data.get("language_code")  # e.g. "en-IN", "ta-IN"
     if not language_code:
-        return None
+        return None, None
     confidence = data.get("language_probability")
     if confidence is not None and confidence < MIN_CONFIDENCE:
-        return None
+        return None, None
     short_code = language_code.split("-")[0]
     if short_code not in SUPPORTED_LANGUAGES:
-        return None
-    return short_code
+        return None, None
+    return short_code, (data.get("transcript") or "").strip() or None

@@ -413,16 +413,16 @@
 
   <section class="hero">
     <div class="wordmark"><span class="mark">A</span>Agni College of Technology</div>
-    <h1>Everything about ACT, one conversation away.</h1>
+    <h1>Everything about Agni, one conversation away.</h1>
     <p>Ask about admissions, courses, placements, or campus life — in English or Tamil — and get answers straight from the college, any time.</p>
     <div class="hero-hint">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-      <span>Try ACT AI in the corner</span>
+      <span>Try Agni AI in the corner</span>
     </div>
   </section>
 
   <!-- Floating launcher button -->
-  <button class="launcher" id="launcherBtn" aria-label="Open ACT AI">
+  <button class="launcher" id="launcherBtn" aria-label="Open Agni AI">
     <svg viewBox="0 0 24 24"><path d="M12 3C7.03 3 3 6.58 3 11c0 2.39 1.19 4.53 3.06 6.02-.1.98-.5 2.28-1.5 3.48 1.7-.16 3.24-.86 4.4-1.72.94.25 1.95.39 3.04.39 4.97 0 9-3.58 9-8s-4.03-8-9-8z"/></svg>
   </button>
 
@@ -431,7 +431,7 @@
     <div class="widget-header">
       <div class="brand">
         <div class="brand-mark">A</div>
-        <h2>ACT AI</h2>
+        <h2>Agni AI</h2>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <button class="collapse-btn" id="collapseBtn" aria-label="Collapse">
@@ -448,32 +448,32 @@
       <div class="topic-grid">
         <div class="topic-card"
              data-avatar="about-us"
-             data-topic-en="Tell me about ACT — what makes it a good college?"
-             data-topic-ta="ACT பற்றி சொல்லுங்கள் — இது ஏன் சிறந்த கல்லூரி?">
+             data-topic-en="Tell me about Agni — what makes it a good college?"
+             data-topic-ta="அக்னி பற்றி சொல்லுங்கள் — இது ஏன் சிறந்த கல்லூரி?">
           <img class="topic-avatar" src="assets/about-us-idle.png" alt="About Us">
           <span data-label-en="About Us" data-label-ta="எங்களை பற்றி">About Us</span>
         </div>
 
         <div class="topic-card"
              data-avatar="courses"
-             data-topic-en="What courses does ACT offer?"
-             data-topic-ta="ACT எந்த படிப்புகளை வழங்குகிறது?">
+             data-topic-en="What courses does Agni offer?"
+             data-topic-ta="அக்னி எந்த படிப்புகளை வழங்குகிறது?">
           <img class="topic-avatar" src="assets/courses-idle.png" alt="Courses">
           <span data-label-en="Courses" data-label-ta="படிப்புகள்">Courses</span>
         </div>
 
         <div class="topic-card"
              data-avatar="admissions"
-             data-topic-en="How do I get admission into ACT?"
-             data-topic-ta="ACT-இல் சேர்க்கை பெறுவது எப்படி?">
+             data-topic-en="How do I get admission into Agni?"
+             data-topic-ta="அக்னியில் சேர்க்கை பெறுவது எப்படி?">
           <img class="topic-avatar" src="assets/admissions-idle.png" alt="Admissions">
           <span data-label-en="Admissions" data-label-ta="சேர்க்கை">Admissions</span>
         </div>
 
         <div class="topic-card"
              data-avatar="placements"
-             data-topic-en="Tell me about placements at ACT."
-             data-topic-ta="ACT-இல் வேலைவாய்ப்பு பற்றி சொல்லுங்கள்.">
+             data-topic-en="Tell me about placements at Agni."
+             data-topic-ta="அக்னியில் வேலைவாய்ப்பு பற்றி சொல்லுங்கள்.">
           <img class="topic-avatar" src="assets/placements-idle.png" alt="Placements">
           <span data-label-en="Placements" data-label-ta="வேலைவாய்ப்பு">Placements</span>
         </div>
@@ -510,7 +510,7 @@
   // ---------------------------------------------------------------------
   // Avatar tile highlighting — "active" (steady gold ring) tracks which
   // category the conversation is currently about; "speaking" (animated
-  // pulse) tracks whether ACT AI is actively producing audio for it right
+  // pulse) tracks whether Agni AI is actively producing audio for it right
   // now. Category is picked by simple keyword matching against the reply
   // text rather than a backend field, since the voice path's reply travels
   // through the voice pipeline's strict OpenAI-compatible SSE schema — an
@@ -703,7 +703,7 @@
 
     addBubble(message, 'user');
     conversationHistory.push({ role: 'user', content: message });
-    statusLine.textContent = 'ACT AI is thinking...';
+    statusLine.textContent = 'Agni AI is thinking...';
     sendBtn.disabled = true;
 
     try {
@@ -728,7 +728,7 @@
     } catch (err) {
       addBubble("Sorry, I'm having trouble connecting right now. Please try again in a moment, or reach out to admissions directly.", 'assistant');
       statusLine.textContent = '';
-      console.error('ACT AI widget error:', err);
+      console.error('Agni AI widget error:', err);
     } finally {
       sendBtn.disabled = false;
     }
@@ -844,7 +844,7 @@
     // resume() on an already-running context is a cheap no-op, so calling
     // it unconditionally before every chunk is the standard defensive fix.
     if (playbackCtx.state !== 'running') {
-      console.warn(`ACT AI: playbackCtx.state is "${playbackCtx.state}" when a chunk arrived — resuming.`);
+      console.warn(`Agni AI: playbackCtx.state is "${playbackCtx.state}" when a chunk arrived — resuming.`);
       playbackCtx.resume();
     }
     try {
@@ -867,14 +867,14 @@
       const startAt = Math.max(nextPlayTime, playbackCtx.currentTime);
       source.start(startAt);
       nextPlayTime = startAt + audioBuffer.duration;
-      console.debug(`ACT AI: scheduled ${arrayBuffer.byteLength}B chunk at ctx time ${startAt.toFixed(3)} (ctx.currentTime=${playbackCtx.currentTime.toFixed(3)}, state=${playbackCtx.state})`);
+      console.debug(`Agni AI: scheduled ${arrayBuffer.byteLength}B chunk at ctx time ${startAt.toFixed(3)} (ctx.currentTime=${playbackCtx.currentTime.toFixed(3)}, state=${playbackCtx.state})`);
     } catch (err) {
-      console.error('ACT AI: playPcm16Chunk failed:', err);
+      console.error('Agni AI: playPcm16Chunk failed:', err);
     }
   }
 
   // Barge-in: called when Deepgram reports the user has started speaking
-  // again while ACT AI's reply is still queued/playing. Without this, every
+  // again while Agni AI's reply is still queued/playing. Without this, every
   // already-scheduled chunk (queued via the gapless-playback scheduling in
   // playPcm16Chunk above) keeps playing to completion regardless of the
   // user talking over it — true half-duplex behavior that makes the
@@ -940,7 +940,7 @@
             language = data.language || null;
           }
         } catch (err) {
-          console.error('ACT AI language detection error:', err);
+          console.error('Agni AI language detection error:', err);
         }
         resolve({ language, chunks });
       };
@@ -987,10 +987,10 @@
     playbackSampleRate = 24000;
     playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: playbackSampleRate });
     nextPlayTime = playbackCtx.currentTime;
-    console.debug(`ACT AI: playbackCtx created, initial state="${playbackCtx.state}"`);
+    console.debug(`Agni AI: playbackCtx created, initial state="${playbackCtx.state}"`);
     playbackCtx.resume().then(
-      () => console.debug(`ACT AI: playbackCtx.resume() resolved, state="${playbackCtx.state}"`),
-      (err) => console.error('ACT AI: playbackCtx.resume() rejected:', err)
+      () => console.debug(`Agni AI: playbackCtx.resume() resolved, state="${playbackCtx.state}"`),
+      (err) => console.error('Agni AI: playbackCtx.resume() rejected:', err)
     );
     // Belt-and-suspenders against the browser auto-suspending an idle
     // context mid-session (see playPcm16Chunk's comment) — a silent gap
@@ -1049,13 +1049,13 @@
       return;
     }
 
-    statusLine.textContent = 'Connecting to ACT AI voice...';
+    statusLine.textContent = 'Connecting to Agni AI voice...';
     // playbackSampleRate/playbackCtx were already set up above, synchronous
     // with the click — endpoint.playbackSampleRate is asserted to match
     // (both languages use 24000; see VOICE_ENDPOINTS).
     if (endpoint.playbackSampleRate !== playbackSampleRate) {
       console.warn(
-        `ACT AI: ${currentLanguage} voice endpoint expects ${endpoint.playbackSampleRate}Hz playback, ` +
+        `Agni AI: ${currentLanguage} voice endpoint expects ${endpoint.playbackSampleRate}Hz playback, ` +
         `but the AudioContext was already created at ${playbackSampleRate}Hz.`
       );
     }
@@ -1118,7 +1118,7 @@
             setSpeakingTopic(false);
             statusLine.textContent = 'Listening...';
           } else if (msg.type === 'AgentThinking') {
-            statusLine.textContent = 'ACT AI is thinking...';
+            statusLine.textContent = 'Agni AI is thinking...';
           } else if (msg.type === 'topic' && msg.topic) {
             // Sent by voice-pipeline's ConversationRouter (2026-09-29) —
             // the server-side counterpart to classifyCategory below, since
@@ -1136,7 +1136,7 @@
         }
       } else {
         playPcm16Chunk(event.data);
-        statusLine.textContent = 'ACT AI is speaking...';
+        statusLine.textContent = 'Agni AI is speaking...';
         // Deepgram doesn't send an explicit "agent stopped speaking" event,
         // so infer end-of-speech from a gap in incoming audio chunks: keep
         // the pulse alive on every chunk, and only clear it once no new

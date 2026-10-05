@@ -1,4 +1,4 @@
-"""ACT AI's shared RAG backend.
+"""Agni AI's shared RAG backend.
 
 Every input path — typed chat, English voice, and Tamil voice — calls this
 single chat-completion logic, so all three stay on one brain (same retrieval
@@ -21,6 +21,7 @@ Sarvam/Pipecat relay Tamil already uses, generalized in Phase 3.
 import json
 import logging
 import os
+import time
 
 from dotenv import load_dotenv
 
@@ -33,10 +34,10 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI
 
 from retriever import retriever
-from leads import save_lead
+from leads import normalize_indian_mobile, save_lead
 from conversation_logger import log_turn, prune_old_logs
 
-app = FastAPI(title="ACT AI RAG Backend")
+app = FastAPI(title="Agni AI RAG Backend")
 logger = logging.getLogger("rag_backend")
 logging.basicConfig(level=logging.INFO)
 
@@ -47,6 +48,16 @@ async def _prune_logs_on_startup():
     a running scheduler, since this only needs to happen about once a day
     and the backend restarts at least that often in practice."""
     prune_old_logs()
+
+
+@app.on_event("startup")
+async def _warm_retriever():
+    """Build the embedding index now, not inside the first visitor's request
+    (which would otherwise wait for the whole knowledge base to be embedded)."""
+    try:
+        await retriever.warm_up()
+    except Exception:
+        logger.exception("Retriever warm-up failed; it will retry on the first request")
 
 WIDGET_ALLOWED_ORIGINS = [
     origin.strip()
@@ -82,7 +93,7 @@ CHAT_MODEL = "sarvam-105b"
 DISABLE_REASONING = {"reasoning_effort": None}
 BACKEND_AUTH_KEY = os.environ.get("RAG_BACKEND_AUTH_KEY")
 
-SYSTEM_PROMPT_TEMPLATE = """You are ACT AI, the friendly voice/chat assistant for
+SYSTEM_PROMPT_TEMPLATE = """You are Agni AI, the friendly voice/chat assistant for
 Agni College of Technology. Talk like a helpful senior student showing someone
 around campus, not like a brochure: warm, direct, and brief.
 
@@ -192,20 +203,30 @@ async def _resolve_tool_calls(
                 args = json.loads(function.get("arguments") or "{}")
             except json.JSONDecodeError:
                 args = {}
-            saved = save_lead(
-                name=args.get("name", ""),
-                phone=args.get("phone", ""),
-                email=args.get("email"),
-                preferred_course=args.get("preferred_course"),
-                language=language,
-                source=source,
-            )
-            result = (
-                "Lead recorded for admissions follow-up. Thank the visitor warmly."
-                if saved
-                else "Lead noted (Sheets write failed, but don't mention that to the "
-                "visitor — just thank them warmly as usual)."
-            )
+            phone = normalize_indian_mobile(args.get("phone", ""))
+            if phone is None:
+                logger.warning("capture_lead rejected invalid phone %r", args.get("phone"))
+                result = (
+                    "Lead NOT saved: that phone number isn't a valid 10-digit "
+                    "Indian mobile number (it may have been misheard). Read the "
+                    "digits back to the visitor and ask them to repeat the full "
+                    "number, then call capture_lead again."
+                )
+            else:
+                saved = save_lead(
+                    name=args.get("name", ""),
+                    phone=phone,
+                    email=args.get("email"),
+                    preferred_course=args.get("preferred_course"),
+                    language=language,
+                    source=source,
+                )
+                result = (
+                    "Lead recorded for admissions follow-up. Thank the visitor warmly."
+                    if saved
+                    else "Lead noted (Sheets write failed, but don't mention that to the "
+                    "visitor — just thank them warmly as usual)."
+                )
         extended.append(
             {"role": "tool", "tool_call_id": call.get("id"), "content": result}
         )
@@ -241,22 +262,52 @@ def _normalize_roles_for_sarvam(messages: list[dict]) -> list[dict]:
     ]
 
 
-async def _build_full_messages(messages: list[dict]) -> list[dict]:
+def _retrieval_query(user_turns: list[str]) -> str:
+    """Pick what to search the knowledge base with. A very short turn ("yes",
+    "okay", "சரி", "interested in undergraduate") carries almost no topic, so
+    searching on it retrieves noise — and costs a fresh embedding call. Fall
+    back to the most recent substantive user turn, whose embedding is already
+    cached from the turn that asked it."""
+    latest = user_turns[-1]
+    if len(latest.split()) > 3:
+        return latest
+    for earlier in reversed(user_turns[:-1]):
+        if len(earlier.split()) > 3:
+            return earlier
+    return latest
+
+
+VOICE_BREVITY_ADDENDUM = """
+
+SPOKEN-CALL LIMIT (overrides the 2-4 sentence guideline above): this reply
+will be heard aloud, so keep it under 45 words — two short sentences, three
+at most. Lead with the single most useful fact. If the context holds a list
+(courses, facilities, recruiters, numbers), name at most 3 items and offer to
+go on. Do not recite the context, do not restate the question, and add a
+closing question only if you haven't already asked for something."""
+
+
+async def _build_full_messages(messages: list[dict], voice: bool = False) -> list[dict]:
     """Shared brain: retrieve context for the latest turn and prepend the
-    ACT AI persona + that context to the FULL conversation history, so
+    Agni AI persona + that context to the FULL conversation history, so
     follow-ups resolve correctly. Used by every input path."""
     messages = _normalize_roles_for_sarvam(messages)
     # Retrieval should key off what the visitor actually asked, not a
     # synthetic developer/system recovery message that may be the literal
     # last entry (see _normalize_roles_for_sarvam above) — search backward
     # for the most recent real user turn instead of assuming messages[-1].
-    latest_user_message = next(
-        (m["content"] for m in reversed(messages) if m.get("role") == "user"),
-        messages[-1]["content"],
-    )
-    context = await retriever.search(latest_user_message, top_k=4)
+    user_turns = [m["content"] for m in messages if m.get("role") == "user"]
+    query = _retrieval_query(user_turns) if user_turns else messages[-1]["content"]
+    t0 = time.perf_counter()
+    context = await retriever.search(query, top_k=4)
+    logger.info("[timing] retrieval %.0f ms (query %d chars)",
+                (time.perf_counter() - t0) * 1000, len(query))
     return [
-        {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(context=context)},
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT_TEMPLATE.format(context=context)
+            + (VOICE_BREVITY_ADDENDUM if voice else ""),
+        },
         *messages,  # preserves every prior user/assistant turn
     ]
 
@@ -275,7 +326,7 @@ async def _generate_reply(messages: list[dict], source: str = "chat"):
     (lead saved, tool result appended) and re-submitted for the model's
     actual reply before returning — the caller never sees a tool_calls
     finish_reason, only a normal assistant message."""
-    full_messages = await _build_full_messages(messages)
+    full_messages = await _build_full_messages(messages, voice=(source == "voice"))
     response = await chat_client.chat.completions.create(
         model=CHAT_MODEL,
         messages=full_messages,
@@ -314,10 +365,12 @@ async def _stream_reply_sse(messages: list[dict], source: str = "voice"):
     here, resolved (lead saved, tool result appended), and a follow-up stream
     is started for the model's actual spoken reply. Pipecat only ever sees
     plain content deltas, exactly as before Phase 8."""
-    full_messages = await _build_full_messages(messages)
+    t_start = time.perf_counter()
+    full_messages = await _build_full_messages(messages, voice=(source == "voice"))
     current_messages = full_messages
 
-    for _ in range(2):  # at most one tool-resolution round-trip
+    for round_no in range(2):  # at most one tool-resolution round-trip
+        t_round = time.perf_counter()
         stream = await chat_client.chat.completions.create(
             model=CHAT_MODEL,
             messages=current_messages,
@@ -332,6 +385,11 @@ async def _stream_reply_sse(messages: list[dict], source: str = "voice"):
         try:
             async for chunk in stream:
                 chunk_count += 1
+                if chunk_count == 1:
+                    logger.info("[timing] round %d first chunk %.0f ms after request start "
+                                "(%.0f ms after Sarvam call)", round_no + 1,
+                                (time.perf_counter() - t_start) * 1000,
+                                (time.perf_counter() - t_round) * 1000)
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.tool_calls:
                     saw_tool_calls = True
@@ -349,6 +407,9 @@ async def _stream_reply_sse(messages: list[dict], source: str = "voice"):
                     continue
                 if delta and delta.content is not None:
                     content_chunk_count += 1
+                    if content_chunk_count == 1:
+                        logger.info("[timing] round %d first content %.0f ms after request start",
+                                    round_no + 1, (time.perf_counter() - t_start) * 1000)
                     yield f"data: {chunk.model_dump_json()}\n\n"
         except Exception:
             logger.exception(

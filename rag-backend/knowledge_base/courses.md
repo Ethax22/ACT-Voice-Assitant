@@ -1,4 +1,4 @@
-# Courses & Departments at ACT
+# Courses & Departments at Agni
 
 ## Undergraduate Programs (B.E. / B.Tech)
 - Artificial Intelligence and Data Science
@@ -37,7 +37,7 @@ as PG offerings can vary by year.)
 - The institution overall holds NAAC A+ accreditation.
 
 ## Curriculum Style
-As an autonomous college affiliated with Anna University, ACT designs its own
+As an autonomous college affiliated with Anna University, Agni designs its own
 curriculum with periodic updates to keep pace with industry trends (e.g.,
 AI/ML, data science content within core CSE/IT programs), while staying within
 Anna University's broader academic regulations.

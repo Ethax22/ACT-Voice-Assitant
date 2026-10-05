@@ -26,13 +26,13 @@ Language = Literal["en", "ta"]
 
 PERSONA_PROMPTS: dict[Language, str] = {
     "en": (
-        "You are ACT AI, the voice assistant for Agni College of Technology. "
+        "You are Agni AI, the voice assistant for Agni College of Technology. "
         "Talk like a helpful senior student showing someone around campus: warm, "
         "direct, and brief. Keep answers short since this is a spoken "
         "conversation, not a lookup. Respond in English."
     ),
     "ta": (
-        "You are ACT AI, the voice assistant for Agni College of Technology. "
+        "You are Agni AI, the voice assistant for Agni College of Technology. "
         "Talk like a helpful senior student showing someone around campus: warm, "
         "direct, and brief. Keep answers short since this is a spoken "
         "conversation, not a lookup. Respond in Tamil."
@@ -40,8 +40,8 @@ PERSONA_PROMPTS: dict[Language, str] = {
 }
 
 GREETINGS: dict[Language, str] = {
-    "en": "Hi! I'm ACT AI. Ask me about admissions, courses, placements, or campus life at Agni College of Technology.",
-    "ta": "வணக்கம்! நான் ACT AI. சேர்க்கை, படிப்புகள், வேலைவாய்ப்பு பற்றி என்னிடம் கேளுங்கள்.",
+    "en": "Hi! I'm Agni AI. Ask me about admissions, courses, placements, or campus life at Agni College of Technology.",
+    "ta": "வணக்கம்! நான் Agni AI. சேர்க்கை, படிப்புகள், வேலைவாய்ப்பு பற்றி என்னிடம் கேளுங்கள்.",
 }
 
 # Phase 4 (turn-taking/barge-in): Sarvam's realtime STT drives turn
@@ -205,7 +205,6 @@ def build_pipeline(websocket, language: Language, session_id: str):
 
     from conversation_logger import TranscriptLogger, save_session_audio
     from conversation_router import ConversationRouter, ConversationRouterCallbacks, TOPIC_VOICES
-    from language_detection import detect_language
     from latency_metrics import LatencyLogger
     from raw_pcm_serializer import RawPCMSerializer
 
@@ -385,17 +384,12 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # language — reacts within about one turn, not instantly, since
     # detection is itself a real API call (~0.6-0.8s).
     audio_logger = AudioBufferProcessor(
-        num_channels=1, buffer_size=0, auto_start_recording=True, enable_turn_audio=True
+        num_channels=1, buffer_size=0, auto_start_recording=True
     )
 
     @audio_logger.event_handler("on_audio_data")
     async def _on_audio_data(processor, audio, sample_rate, num_channels):
         save_session_audio(session_id, audio, sample_rate, num_channels)
-
-    @audio_logger.event_handler("on_user_turn_audio")
-    async def _on_user_turn_audio(processor, turn_audio):
-        detected = await detect_language(turn_audio.audio, turn_audio.sample_rate)
-        await router.maybe_auto_switch_language(detected)
 
     transcript_logger = TranscriptLogger(
         context, session_id=session_id, language=lambda: router.language
@@ -443,13 +437,14 @@ def build_pipeline(websocket, language: Language, session_id: str):
     async def _on_client_connected(transport, client):
         await worker.queue_frames([TTSSpeakFrame(GREETINGS[language])])
 
-    # Phase 7 cleanup: close the aiohttp session ClonedVoiceTTSService opened
-    # above, if this call used one. Stock-voice sessions never create one, so
-    # this is a no-op for them.
-    if cloned_voice_http_session is not None:
-
-        @transport.event_handler("on_client_disconnected")
-        async def _on_client_disconnected(transport, client):
+    # On hangup, tear the whole pipeline down. Without this the Sarvam STT
+    # websocket stays open until its 60s inactivity timeout fires an error.
+    # Also closes the aiohttp session ClonedVoiceTTSService opened above, if
+    # this call used one (stock-voice sessions never create one).
+    @transport.event_handler("on_client_disconnected")
+    async def _on_client_disconnected(transport, client):
+        if cloned_voice_http_session is not None:
             await cloned_voice_http_session.close()
+        await worker.cancel(reason="client disconnected")
 
     return worker

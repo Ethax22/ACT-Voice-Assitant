@@ -1,6 +1,6 @@
-# Placements at ACT
+# Placements at Agni
 
-Source: official ACT website placement statistics page (act.edu.in/placement-statistics)
+Source: official Agni website placement statistics page (act.edu.in/placement-statistics)
 and list-of-recruiters page.
 
 ## Year-by-year statistics (official)

@@ -1,4 +1,4 @@
-# Admissions at ACT
+# Admissions at Agni
 
 Source: official admissions page (act.edu.in/admissions-agni), 2026-27.
 
@@ -19,7 +19,7 @@ Source: official admissions page (act.edu.in/admissions-agni), 2026-27.
 - Only **M.E. Structural Engineering** is currently listed.
 
 ## How to Apply
-- Online via the ACT website (act.edu.in online application) or the TNEA
+- Online via the Agni website (act.edu.in online application) or the TNEA
   single-window portal for UG.
 - Application form: Rs 300 (cash/DD), Rs 350 if requested by post. DD payable to
   "Agni College of Technology", Chennai.
@@ -37,7 +37,7 @@ student/guardian conduct declaration.
 - Exact fee amounts are not published on the site — direct to admissions.
 
 ## Scholarships
-- A Merit Scholarship exists (application form on the site). ACT reports 4,000+
+- A Merit Scholarship exists (application form on the site). Agni reports 4,000+
   scholarships awarded over five years; confirm the current scheme with
   admissions.
 

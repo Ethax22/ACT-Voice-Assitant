@@ -41,6 +41,7 @@ from typing import Literal
 from loguru import logger
 from pipecat.frames.frames import (
     Frame,
+    InputAudioRawFrame,
     LLMUpdateSettingsFrame,
     ManuallySwitchServiceFrame,
     OutputTransportMessageFrame,
@@ -50,6 +51,13 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings, STTSettings, TTSSettings
+
+from language_detection import detect_language_and_transcript
+
+# Rolling cap on buffered mic audio, and the shortest turn we'll trust for a
+# language flip.
+MAX_BUFFER_SECONDS = 15
+MIN_DETECT_SECONDS = 1.0
 
 Language = Literal["en", "ta"]
 Topic = Literal["about-us", "admissions", "courses", "placements"]
@@ -231,6 +239,8 @@ class ConversationRouter(FrameProcessor):
         self._callbacks = callbacks
         self._stock_tts = stock_tts
         self._cloned_services_by_topic = cloned_services_by_topic or {}
+        self._audio_buf = bytearray()
+        self._audio_rate = 16000
 
     @property
     def language(self) -> Language:
@@ -239,10 +249,42 @@ class ConversationRouter(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TranscriptionFrame) and frame.text and frame.text.strip():
+        if isinstance(frame, InputAudioRawFrame):
+            # STT forwards its input audio downstream; keep the current
+            # utterance's tail so the transcript handler can language-detect
+            # it BEFORE the reply is generated.
+            self._audio_buf.extend(frame.audio)
+            self._audio_rate = frame.sample_rate
+            del self._audio_buf[: -MAX_BUFFER_SECONDS * self._audio_rate * 2]
+        elif isinstance(frame, TranscriptionFrame) and frame.text and frame.text.strip():
+            await self._detect_and_switch(frame)
             await self._handle_transcript(frame.text)
 
         await self.push_frame(frame, direction)
+
+    async def _detect_and_switch(self, frame: TranscriptionFrame):
+        """2026-10-05: run language detection on this turn's audio BEFORE the
+        transcript is released to the LLM. Previously detection ran after the
+        turn (AudioBufferProcessor.on_user_turn_audio), so the reply to the
+        first Tamil utterance was still generated under the English persona
+        and the call only flipped on the NEXT turn. Realtime STT is also
+        locked to the call language, so Tamil speech on an `en` call arrived
+        as transliterated English; on a switch the batch transcript (spoken
+        language, not forced) replaces it."""
+        audio, rate = bytes(self._audio_buf), self._audio_rate
+        self._audio_buf.clear()
+        # Very short turns ("ok", "yes") are too ambiguous to flip a call on.
+        if len(audio) < MIN_DETECT_SECONDS * rate * 2:
+            return
+        try:
+            detected, transcript = await detect_language_and_transcript(audio, rate)
+        except Exception as e:  # never let detection break the turn
+            logger.warning(f"ConversationRouter: language detection failed: {e}")
+            return
+        if detected and detected != self._language:
+            await self._switch_language(detected)
+            if transcript:
+                frame.text = transcript
 
     async def _activate_topic_voice(self, category: Topic):
         """Make the right TTS instance active/configured for `category`,

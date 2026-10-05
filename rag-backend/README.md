@@ -1,6 +1,6 @@
 # rag-backend
 
-The shared "brain" for ACT AI. Every input path — typed chat, Deepgram English
+The shared "brain" for Agni AI. Every input path — typed chat, Deepgram English
 voice, and the Sarvam Tamil pipeline — calls the same underlying chat logic,
 so answers stay consistent across languages and input modes. Two routes
 expose it: `/v1/chat/completions` (bearer-auth, OpenAI-compatible, for
