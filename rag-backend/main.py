@@ -431,6 +431,16 @@ async def widget_chat(payload: WidgetChatRequest):
     return {"reply": reply}
 
 
+
+
+@app.post("/admin/reload-knowledge")
+async def reload_knowledge(request: Request):
+    """Re-ingest markdown, knowledge_base/data/ files and the knowledge Google
+    Sheet after admissions edits them — no redeploy needed."""
+    _check_auth(request)
+    return {"chunks": await retriever.reload()}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}

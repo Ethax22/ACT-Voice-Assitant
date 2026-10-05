@@ -35,6 +35,8 @@ import numpy as np
 import tiktoken
 from openai import AsyncAzureOpenAI
 
+from data_loader import load_all_data
+
 KNOWLEDGE_BASE_DIR = Path(__file__).parent / "knowledge_base"
 CHUNK_TOKENS = 500
 CHUNK_OVERLAP_TOKENS = 50
@@ -86,12 +88,30 @@ class Retriever:
         async with self._ingest_lock:
             if self._ingested:  # re-check: another request may have ingested while we waited
                 return
-            for file_path in sorted(KNOWLEDGE_BASE_DIR.glob("*.md")):
-                text = file_path.read_text(encoding="utf-8")
-                self._chunks.extend(_chunk_text(text))
-            if self._chunks:
-                self._embeddings = await self._embed(self._chunks)
+            await self._ingest()
             self._ingested = True
+
+    async def _ingest(self):
+        """Build the full chunk set, then swap it in atomically — a failed
+        rebuild (e.g. embedding error) leaves the previous index serving."""
+        chunks: list[str] = []
+        for file_path in sorted(KNOWLEDGE_BASE_DIR.glob("*.md")):
+            text = file_path.read_text(encoding="utf-8")
+            chunks.extend(_chunk_text(text))
+        chunks.extend(await asyncio.to_thread(load_all_data))
+        embeddings = await self._embed_batched(chunks) if chunks else None
+        self._chunks, self._embeddings = chunks, embeddings
+
+    async def _embed_batched(self, texts: list[str], batch: int = 96) -> np.ndarray:
+        parts = [await self._embed(texts[i : i + batch]) for i in range(0, len(texts), batch)]
+        return np.vstack(parts)
+
+    async def reload(self) -> int:
+        """Re-read markdown, data files and the Google Sheet. Returns chunk count."""
+        async with self._ingest_lock:
+            await self._ingest()
+            self._ingested = True
+        return len(self._chunks)
 
     async def search(self, query: str, top_k: int = 4) -> str:
         await self._ensure_ingested()
