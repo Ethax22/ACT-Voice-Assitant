@@ -47,7 +47,7 @@ ACT-Voice-Assistant/
                            # Plan phase 3) — one Pipecat service serving BOTH languages
                            # (Sarvam STT + RAG backend + Sarvam TTS), parameterized by language
 └── widget/               # One-page site + Agni AI widget (starting point already exists —
-                           # ask Prakash for the current act-ai-widget.html if not yet copied in)
+                           # ask Prakash for the current the current widget HTML if not yet copied in)
 ```
 
 ## Environment variables (never commit these)

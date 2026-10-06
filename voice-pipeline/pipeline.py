@@ -254,7 +254,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
         api_key=rag_backend_auth_key,
         base_url=f"{rag_backend_public_url}/v1",
         settings=OpenAILLMService.Settings(
-            model="act-ai",  # ignored by our backend, which always uses its own Sarvam 105B model
+            model="agni-ai",  # ignored by our backend, which always uses its own Sarvam 105B model
             system_instruction=PERSONA_PROMPTS[language],
         ),
     )

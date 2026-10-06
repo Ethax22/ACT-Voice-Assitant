@@ -101,7 +101,7 @@ def main():
     if not args.audio_file.exists():
         sys.exit(f"File not found: {args.audio_file}")
 
-    name = args.name or f"act-ai-{args.language}-{args.audio_file.stem}"
+    name = args.name or f"agni-ai-{args.language}-{args.audio_file.stem}"
 
     try:
         result = asyncio.run(create_cloned_voice(args.audio_file, args.language, name))
