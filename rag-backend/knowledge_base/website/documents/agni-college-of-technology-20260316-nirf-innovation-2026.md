@@ -1,0 +1,372 @@
+# Agni College of Technology 20260316 NIRF INNOVATION 2026 (Agni College of Technology 20260316 NIRF INNOVATION 2026) — document from the NIRF page
+Source: https://act.edu.in/wp-content/uploads/2026/04/Agni-College-of-Technology-20260316-NIRF-INNOVATION-2026.pdf
+Linked from: https://act.edu.in/nirf-2/
+
+## Page 1
+
+National Institutional Ranking Framework
+Ministry of Education
+Government of India
+Welcome to Data Capturing System: INNOVATION
+Submitted Institute Data for NIRF'2026'
+Institute Name: Agni College of Technology [IR-I-C-16570]
+Sanctioned (Approved) Intake
+Academic Year 2024-25 2023-24 2022-23 2021-22 2020-21 2019-20
+UG [4 Years Program(s)] 660 660 600 690 - -
+PG [2 Year Program(s)] 18 18 - - - -
+Total Actual Student Strength (Program(s) Offered by Your Institution)
+(All programs No. of Male No. of Female Total Students Within State Outside State Outside Economically Socially No. of students No. of students No. of students No. of students
+of all years) Students Students (Including male (Including male Country Backward Challenged receiving full receiving full receiving full who are not
+& female) & female) (Including male (Including male (SC+ST+OBC tuition fee tuition fee tuition fee receiving full
+& female) & female) Including male reimbursement reimbursement reimbursement tuition fee
+& female) from the State from Institution from the Private reimbursement
+and Central Funds Bodies
+Government
+UG [4 Years 1354 1169 2523 2107 416 0 325 2105 827 1209 164 230
+Program(s)]
+PG [2 Year 11 13 24 19 5 0 3 18 4 9 1 7
+Program(s)]
+Start up recognized by DPIIT/startup India
+Name of Venture Year of recognition by DPIIT/startup India DPIIT/Start up India Registration No.
+STUDAI EDUTECH PRIVATE LTD 2025 DIPP173486
+STUDAI EDUTECH PRIVATE LTD 2024 DIPP173486
+Startups which have got VC investment in previous 3 years
+Name of startups DPIIT No. Amount received Organisation Name Year of receiving VC investment Achievement Level Type of Investment
+STUDAI EDUTECH PRIVATE DIPP173486 500000 Garuda Aerospace 2023-24 Actual system completed and Seed Capital
+LTD qualified through test and
+demonstration
+STUDAI EDUTECH PRIVATE DIPP173486 650000 Vishnu Surya Projects and Infra 2024-25 Actual system proven through arly stage venture capital
+LTD Limited successful mission operations
+Seed Funding
+Name of the Start-up DPIIT No. Seed funding received(in Name of Government Year of Receiving the Fund Achievement Level Type of Investment
+Rupees) Organization providing Seed
+Funding
+STUDAI EDUTECH PRIVATE DIPP173486 700000 EDII TN 2024-25 Actual system completed and Seed Fund
+LTD qualified through test and
+demonstration
+
+## Page 2
+
+STUDAI EDUTECH PRIVATE DIPP173486 500000 Startup TN 2023-24 System/subsystem model or Seed Fund
+LTD prototype demonstration in a
+relevant environment
+FDI investment in previous 3 years
+Name of startups DPIIT No. FDI investment received(in Organization Name Year of receiving FDI Achievement Level Type of Investment
+Rupees) investment
+NA NA 0 NA NA NA NA
+Innovation grant received from govt. organization in previous 3 years
+Name of Government organisation from which grant is Name of the Program or Scheme Amount of Grant received Year of receiving grant
+received
+AICTE IDEA Lab 9000000 2024-25
+DST IIT Tirupati Navavishkar I-Hub Foundation 2390000 2024-25
+UBA Technology Development 100000 2024-25
+TNSDC Naan Mudhalvan Niral Thiruvizha 20000 2024-25
+TNSCST Student Project Scheme 22500 2024-25
+AICTE ATAL FDP 350000 2024-25
+NanMudhalvan Tamilnadu NIRAL THIRUVIZHA 20000 2023-24
+CSIR SEMINAR GRANT 50000 2023-24
+NSDC TRAINING PARTNER 1452211 2023-24
+TNSCST Student Project Scheme 17500 2023-24
+AICTE ATAL FDP 600000 2022-23
+TNSCST Student Project Scheme 37500 2022-23
+Patents
+Calendar year 2024 2023 2022
+No. of Patents Published 24 43 27
+No. of Patents Granted 1 1 0
+Patents Commercialized & Technology Transferred
+Calendar year 2024 2023 2022
+Patents Commercialized & Technology Transferred 0 0 0
+Income from Technology Transferred(in Rupees). 0 0 0
+Innovations at various stages of Technology Readiness Level
+Name of the Start-up DPIIT No. Innovation Name Stage of technology
+STUDAI EDUTECH PRIVATE LTD DIPP173486 Autonomous AI system Actual system completed and qualified through test and
+demonstration.
+
+## Page 3
+
+Ventures/startups grown to turnover of 50 lacs
+Name of startups DPIIT No. Company's Turnover
+STUDAI EDUTECH PRIVATE LTD DIPP173486 500000
+Alumni that are Founders of Forbes/Fortune 500 companies
+Name of the Alumni Program passed from Year of passing Founder of company Year in which company appeared in Forbes /
+Fortune 500
+NIL NIL 0 NIL 0
+Pre-incubation Activities
+Financial Year 2024-25 2023-24 2022-23
+Number of participants in Pre-incubation activities 26 24 18
+Expenditure on pre-incubation activities 6238421 5912763 5890666
+Incubation Activities
+Financial Year 2024-25 2023-24 2022-23
+Number of participants Incubated 25 24 19
+Expenditure on incubation activities 11356743 11356743 11226665
+Income generated by institution through incubation activities 3582428 3456544 3236266
+FDP
+Academic year Title of Course Program Coordinator(PC) Contact Details of(PC) No.of Participants Expenditure Program Start Date Program End Date
+2024-25 Outcome-Based Innovation Dr.P.Purushothaman 7667660754 35 125000 2024-08-12T00:00:00.000Z 2024-08-16T00:00:00.000Z
+and Entrepreneurship
+Education
+2024-25 Innovation-Led Academic Dr.R.Arularasan 97912 25185 42 95000 2024-11-25T00:00:00.000Z 2024-11-27T00:00:00.000Z
+Excellence in Higher
+Education Institutions
+2024-25 Building an Institutional Dr.B.Dhanasakkaravarthi 63802 28064 28 85000 2025-02-03T00:00:00.000Z 2025-02-05T00:00:00.000Z
+Innovation Ecosystem in HEIs
+2024-25 Innovation In Energy Storage Dr.A.Kalaimurugan 98848 64364 31 78000 2025-03-05T00:00:00.000Z 2025-03-07T00:00:00.000Z
+System
+2024-25 Recent Trends in Biomedical Dr.Sureka 91761 12425 29 82000 2024-10-07T00:00:00.000Z 2024-10-08T00:00:00.000Z
+Engineering for Medical
+Diagnostic Applications
+2024-25 FDP on Innovation and Dr.P.Purushothaman 7667660754 43 94000 2024-08-05T00:00:00.000Z 2024-08-07T00:00:00.000Z
+Product Development
+2023-24 FDP on Entrepreneurship Mrs.Anuja 9940023566 28 151000 2024-05-13T00:00:00.000Z 2024-05-17T00:00:00.000Z
+2023-24 FDP on Entrepreneurship and Dr.K.Ragupathy 9342788841 26 122000 2023-12-18T00:00:00.000Z 2023-12-22T00:00:00.000Z
+Innovation
+2023-24 FDP on Igniting Innovation Mr.S.Ohmshankar 9840596838 24 110000 2023-07-17T00:00:00.000Z 2023-07-19T00:00:00.000Z
+and Entrepreneurship
+
+## Page 4
+
+2022-23 FDP on Startup Innovation Mr.Prasanth 9659157451 28 134000 2022-08-22T00:00:00.000Z 2022-08-26T00:00:00.000Z
+Ecosystem
+2022-23 FDP on New Trends & Dr.N.Sureka 9176112425 21 119000 2022-10-12T00:00:00.000Z 2022-10-15T00:00:00.000Z
+Innovation in BioMedical
+Engineering
+2022-23 FDP on Innovation, Research Dr.R.Pandiyarajan 9940833549 30 124000 2023-02-15T00:00:00.000Z 2023-02-18T00:00:00.000Z
+& IPR
+Academic Courses in Innovation, Entrepreneurship and IPR
+Academic year Title of Course Course Code Type of Course Level of Course(UG/PG/PhD) Course Offering Total Credit Score
+Department/Centre/ UnitName
+2024-25 IPR for Pharma Industry OPY352 Elective Course UG Biomedical Engineering 3
+2024-25 Agriculture Entrepreneurship OAI352 Elective Course UG Chemical Engineering 3
+Developm
+2024-25 Innovation and Product 24EL311 Core Course UG Artificial Intelligence & Data 1
+Development -1 (Idea Generation) science
+2024-25 Innovation and Product 24EL411 Core Course UG Mechanical Engineering 1
+Development -2
+(Conceptualization)
+2024-25 Innovation and Product 24EL511 Core Course UG Electrical & Electronics 1
+Development -3 (Prototype Engineering
+Development & Testing)
+2024-25 Innovation & Product 24EL611 Core Course UG Biomedical Engineering 1
+Development-4(Patent Filing /
+Startup Registration)
+2024-25 Innovation & Product 24EL411 Core Course UG Mechatronics Engineering 1
+Development-4
+2024-25 Innovation and Product 24EL311 Core Course UG Computer Science Engineering 1
+Development -1
+Faculty Details1
+Srno Name Designation Gender Qualification Experience (In Currently working Joining Date Leaving Date Association type
+Months) with institution?
+1 A SAM DANIEL Associate Professor Male Ph.D 168 Yes 14-06-2018 -- Regular
+FENNY
+2 Anuja Prashant Diwan Associate Dean Female Ph.D 298 Yes 04-01-2023 -- Regular
+3 C SURESH Assistant Professor Male M.E. 130 Yes 04-12-2023 -- Regular
+4 Dr E YUVANASHREE Professor Female Ph.D 141 Yes 13-12-2023 -- Regular
+5 Dr Latha Professor Female Ph.D 278 Yes 16-06-2024 -- Regular
+6 Dr P Balakrishnan Assistant Professor Male Ph.D 48 Yes 28-07-2021 -- Regular
+7 Dr S Geerthik Associate Professor Male Ph.D 164 No 04-08-2021 25-07-2025 Regular
+8 Dr SHANMUGAKANI Assistant Professor Female Ph.D 323 No 01-09-2005 27-06-2025 Regular
+S
+9 E Vinodha Assistant Professor Female M.E. 97 Yes 05-07-2021 -- Regular
+10 Jegan K Assistant Professor Male M.E. 156 Yes 09-06-2025 -- Regular
+
+## Page 5
+
+11 K Shalini Assistant Professor Female M.E. 34 Yes 01-08-2022 -- Regular
+12 M Kamatchi Saranya Associate Professor Female M.E. 154 Yes 03-07-2023 -- Regular
+13 Mr Anand C Assistant Professor Male M.E. 109 Yes 09-08-2022 -- Regular
+14 Mr Muthurajan S Assistant Professor Male Ph.D 260 No 07-09-2022 26-06-2025 Regular
+15 Mr S Ajithkumar Assistant Professor Male M.E. 74 Yes 11-08-2024 -- Regular
+16 Mr Swaminathan Assistant Professor Male M.E. 204 Yes 06-01-2025 -- Regular
+17 Mrs Divya B Assistant Professor Female M.Tech 140 Yes 02-09-2024 -- Regular
+18 Mrs Prinslin L Assistant Professor Female M.E. 96 Yes 06-07-2022 -- Regular
+19 Mrs SWATHI CHENNA Assistant Professor Female M.Tech 86 Yes 02-06-2021 -- Regular
+20 Ms D MAHESWARI Associate Dean Female Ph.D 216 Yes 22-11-2010 -- Regular
+21 Ms V NIVI Assistant Professor Female M.E. 30 No 14-11-2022 25-06-2025 Regular
+22 Palani Professor Male Ph.D 338 Yes 07-01-2015 -- Regular
+23 R KALARANI Assistant Professor Female M.Tech 130 Yes 19-04-2022 -- Regular
+24 S NANDHINI Associate Professor Female M.E. 165 Yes 02-01-2023 -- Regular
+25 Sumitha N Associate Professor Female M.E. 252 Yes 05-06-2024 -- Regular
+26 A SUGANYA Assistant Professor Female M.E. 74 Yes 07-12-2022 -- Regular
+27 Anuradha N Assistant Professor Female M.E. 12 Yes 05-06-2024 -- Regular
+28 Dr A Swaminathan Professor Male Ph.D 384 Yes 06-09-2021 -- Regular
+29 Dr G A SENTHIL Professor Male Ph.D 348 Yes 18-08-2021 -- Regular
+30 Dr M Aravindan Professor Male Ph.D 218 Yes 16-04-2024 -- Regular
+31 Dr P MURUGAN Associate Professor Male Ph.D 168 Yes 18-08-2021 -- Regular
+32 Dr S Lakshmanan Associate Professor Male Ph.D 201 Yes 10-06-2024 -- Regular
+33 Dr SRINIVASAN Dean / Principal / Male Ph.D 296 Yes 31-12-2021 -- Regular
+ALAVANDAR Director / Vice
+Chancellor
+34 FERIDINAND T Assistant Professor Male M.E. 138 Yes 27-08-2021 -- Regular
+35 Jini Jacob Y Assistant Professor Female M.Tech 6 Yes 07-08-2024 -- Regular
+36 K Velmurugan Assistant Professor Male M.E. 147 Yes 03-07-2024 -- Regular
+37 M Praveen Assistant Professor Male M.E. 81 Yes 02-01-2023 -- Regular
+38 Mr ATHEENA MILAGI Associate Professor Male Ph.D 199 Yes 08-06-2015 -- Regular
+PANDIYAN
+39 Mr N Arunodhaya Assistant Professor Male Ph.D 156 Yes 11-08-2021 -- Regular
+40 Mr S OHM SHANKAR Associate Professor Male Ph.D 234 Yes 07-03-2007 -- Regular
+41 Mr Thandial Selvam T Assistant Professor Male M.E. 134 Yes 23-06-2021 -- Regular
+42 Mrs Elaiyarani Assistant Professor Female M.E. 122 Yes 01-08-2022 -- Regular
+
+## Page 6
+
+43 Mrs Radhika Associate Dean Female Ph.D 150 No 11-09-2017 18-06-2025 Regular
+Somakumar
+44 Mrs T Geetha Associate Professor Female M.E. 276 Yes 09-08-2024 -- Regular
+45 Ms Divya Y Assistant Professor Female M.Tech 6 Yes 03-07-2024 -- Regular
+46 MsN Dhivya Assistant Professor Female M. Phil 86 No 08-06-2022 23-07-2025 Regular
+47 Pandi Deepa P Assistant Professor Female M.E. 116 Yes 14-07-2021 -- Regular
+48 R KANNAN Associate Professor Male M.E. 293 Yes 04-12-2023 -- Regular
+49 S R Vinotha Assistant Professor Female M.E. 104 Yes 03-11-2023 -- Regular
+50 V Raghuraman Associate Professor Male M.E. 198 Yes 04-12-2023 -- Regular
+51 AJAY KUMAR M Assistant Professor Male M.E. 140 Yes 03-05-2021 -- Regular
+52 ARUL OLI Assistant Professor Male M.E. 147 Yes 21-01-2019 -- Regular
+53 Dr Anandhi B Associate Dean Female Ph.D 240 Yes 04-04-2020 -- Regular
+54 DR G SIMI Associate Dean Female Ph.D 242 Yes 06-11-2024 -- Regular
+MARGARAT
+55 Dr M Sivakami Sundari Associate Dean Female Ph.D 240 No 12-05-2021 30-07-2025 Regular
+56 Dr P Purushothaman Associate Professor Male Ph.D 516 Yes 02-06-2016 -- Regular
+57 Dr S PRABAVATHI Associate Professor Female Ph.D 92 Yes 02-01-2023 -- Regular
+58 Dr Suresh Chander Professor Male Ph.D 228 Yes 06-11-2024 -- Regular
+Kapali B
+59 G SINDHU Associate Professor Female M.E. 163 Yes 22-07-2022 -- Regular
+60 K Arthi Assistant Professor Female M.Tech 118 Yes 02-09-2024 -- Regular
+61 KALAIMURUGAN A Professor Male Ph.D 299 Yes 03-06-2019 -- Regular
+62 MADHAN BALAJI Assistant Professor Male M.E. 170 Yes 06-06-2019 -- Regular
+63 MR BACKIYARAJ A Assistant Professor Male M.E. 122 Yes 06-06-2022 -- Regular
+64 Mr Prasanth S Assistant Professor Male M.E. 108 Yes 07-07-2021 -- Regular
+65 Mr Saravanan J Assistant Professor Male M. Phil 126 Yes 14-09-2022 -- Regular
+66 Mr Yokesvaran K Assistant Professor Male M.Tech 136 Yes 14-07-2021 -- Regular
+67 Mrs G UMADEVI Associate Dean Female Ph.D 267 Yes 07-07-2022 -- Regular
+68 MrS RAJITHA R Associate Professor Female M. Phil 185 Yes 04-07-2011 -- Regular
+69 Mrs T Assistant Professor Female M.Tech 134 Yes 07-07-2021 -- Regular
+KALAITHANGAM
+70 Ms Indhu S Assistant Professor Female M.E. 1 Yes 02-05-2024 -- Regular
+71 N Vimalraj Assistant Professor Male M.E. 69 Yes 09-06-2021 -- Regular
+72 Pandi Selvi Assistant Professor Female M.E. 138 Yes 06-11-2023 -- Regular
+73 R SUBHASHINI Associate Dean Female Ph.D 246 No 09-02-2022 25-06-2025 Regular
+74 S SHIMONA Assistant Professor Female M.E. 38 Yes 21-09-2022 -- Regular
+
+## Page 7
+
+75 Vinotha P Assistant Professor Female M. Phil 70 Yes 02-09-2024 -- Regular
+76 Dr R Ratheesh Professor Male Ph.D 160 Yes 07-07-2021 -- Regular
+77 ANAND T Professor Male Ph.D 307 Yes 09-09-2019 -- Regular
+78 Bilna C Assistant Professor Female M.E. 77 Yes 07-05-2021 -- Regular
+79 Dr Bhuvaneswari M Professor Female Ph.D 246 Yes 02-07-2024 -- Regular
+80 Dr K Arul Associate Professor Male Ph.D 168 No 17-05-2021 26-06-2025 Regular
+81 Dr Associate Professor Male Ph.D 217 Yes 20-09-2010 -- Regular
+NARENDRANATHAN
+S K
+82 Dr R Pandiyarajan Professor Male Ph.D 163 Yes 16-08-2021 -- Regular
+83 Dr Sathish Vilvanathan Assistant Professor Male Ph.D 60 Yes 05-06-2024 -- Regular
+84 Dr Y Raghu Professor Male Ph.D 264 Yes 01-07-2024 -- Regular
+85 I R Silviya Associate Dean Female Ph.D 213 Yes 09-01-2023 -- Regular
+86 K MAHESH KUMAR Associate Professor Male Ph.D 276 Yes 04-06-2018 -- Regular
+87 L PRINSLIN Assistant Professor Female M.E. 130 Yes 25-08-2022 -- Regular
+88 MP SUJATHA Dean / Principal / Female Ph.D 252 Yes 04-01-2023 -- Regular
+Director / Vice
+Chancellor
+89 Mr K Ilayaperumal Associate Professor Male M.E. 229 Yes 02-09-2024 -- Regular
+90 Mr R Praveen Kumar Assistant Professor Male Ph.D 222 Yes 29-11-2017 -- Regular
+91 Mr Sultan Saleem A Associate Professor Male M.E. 336 Yes 06-11-2024 -- Regular
+92 Mrs D Agila Assistant Professor Female M.E. 132 Yes 02-02-2024 -- Regular
+93 Mrs NITHYA R Assistant Professor Female M.E. 174 Yes 05-06-2017 -- Regular
+94 Mrs S D Saranya Assistant Professor Female M.E. 138 Yes 06-09-2024 -- Regular
+95 Ms N Sureka Associate Dean Female Ph.D 150 Yes 04-08-2021 -- Regular
+96 Ms Swathi S Associate Professor Female Ph.D 48 Yes 02-07-2021 -- Regular
+97 P Nithya Associate Professor Female M. Phil 182 Yes 02-01-2023 -- Regular
+98 R Elavarasi Associate Professor Female M.E. 188 Yes 05-07-2023 -- Regular
+99 S DEVADHARSHINI Assistant Professor Female M.E. 34 No 02-01-2023 23-07-2025 Regular
+100 S Vishnuvardhan Assistant Professor Male M.E. 84 Yes 05-07-2021 -- Regular
+101 Dr J Rajeswari Associate Dean Female Ph.D 134 Yes 07-06-2021 -- Regular
+102 Anand C Assistant Professor Male M.E. 118 Yes 01-02-2023 -- Regular
+103 BHARATHAN Assistant Professor Male M.E. 184 Yes 04-01-2017 -- Regular
+104 Dr BALAJI Dean / Principal / Male Ph.D 254 Yes 01-06-2021 -- Regular
+MADHAVAN Director / Vice
+Chancellor
+105 Dr J Binu Clara Assistant Professor Female Ph.D 134 Yes 02-07-2021 -- Regular
+
+## Page 8
+
+106 Dr N Prabhakaran Assistant Professor Male Ph.D 219 Yes 07-07-2021 -- Regular
+107 Dr Purushothaman P Associate Professor Male Ph.D 152 Yes 15-06-2016 -- Regular
+108 Dr Saravanan S Professor Male Ph.D 288 Yes 15-06-2021 -- Regular
+109 Dr Vidyalakshmi Associate Dean Female Ph.D 276 Yes 20-11-2019 -- Regular
+110 G VENI Assistant Professor Female M.E. 104 Yes 03-08-2022 -- Regular
+111 K KADAMBANATHAN Professor Male Ph.D 204 Yes 28-11-2018 -- Regular
+112 L PARTHIBAN Associate Professor Male M. Phil 208 Yes 09-07-2018 -- Regular
+113 MONICA SP Assistant Professor Male M.E. 127 Yes 04-06-2018 -- Regular
+114 Mr K B MOHAMED Associate Professor Male Ph.D 197 Yes 05-06-2017 -- Regular
+ISMAIL
+115 Mr R Arularasan Assistant Professor Male Ph.D 125 Yes 13-07-2022 -- Regular
+116 Mr SRINIVASAN T Assistant Professor Male M.E. 152 Yes 12-06-2017 -- Regular
+117 Mrs Archana S Assistant Professor Female M.E. 84 No 06-07-2022 31-07-2025 Regular
+118 Mrs M Suba Pradha Assistant Professor Female M.E. 24 Yes 12-02-2024 -- Regular
+119 Mrs S Gayathri Assistant Professor Female M.E. 156 Yes 07-08-2024 -- Regular
+120 Mrs VIDHYA R Associate Dean Female Ph.D 228 No 28-06-2011 25-07-2025 Regular
+121 Ms MONICA Assistant Professor Female M.Tech 98 Yes 03-10-2024 -- Regular
+SILVENAS
+122 P MANJU Associate Professor Female M.E. 191 Yes 04-01-2023 -- Regular
+123 R DEIVANAYAKI Assistant Professor Female M.E. 218 Yes 10-05-2021 -- Regular
+124 S Arthi Assistant Professor Female M.E. 34 Yes 01-08-2022 -- Regular
+125 S Vijaya Maheswaran Assistant Professor Male M.E. 186 Yes 03-07-2024 -- Regular
+126 A Pavitra Assistant Professor Female M. Phil 30 No 04-01-2023 30-07-2025 Regular
+127 Anjali N Assistant Professor Female M.E. 12 Yes 05-06-2024 -- Regular
+128 C D KARTHIKA Other Female Ph.D 165 Yes 10-06-2019 -- Regular
+129 Dr DEVI P Associate Professor Male Ph.D 242 Yes 05-11-2024 -- Regular
+130 Dr KAVITHA G Assistant Professor Female Ph.D 47 Yes 04-08-2021 -- Regular
+131 Dr P Anand Professor Male Ph.D 192 Yes 19-07-2024 -- Regular
+132 Dr S Devi Associate Professor Female Ph.D 38 Yes 04-09-2024 -- Regular
+133 Dr Senthilkumar S Professor Male Ph.D 413 Yes 02-01-2023 -- Regular
+134 DURAISAMY P Assistant Professor Male M. Phil 72 Yes 05-12-2022 -- Regular
+135 J Rahul Assistant Professor Male M.E. 32 Yes 07-06-2022 -- Regular
+136 K RAGUPATHY Associate Professor Male Ph.D 168 Yes 14-07-2021 -- Regular
+137 M Arun Associate Professor Male M.E. 230 Yes 07-07-2021 -- Regular
+138 Mr P Sivaprakash Associate Professor Male M.E. 228 Yes 14-08-2024 -- Regular
+
+## Page 9
+
+139 Mr KARTHIKEYAN Associate Professor Male Ph.D 161 Yes 05-06-2017 -- Regular
+140 Mr RAMAMOORTHY Assistant Professor Male Ph.D 356 Yes 01-08-2013 -- Regular
+141 MR Professor Male Ph.D 150 Yes 13-08-2018 -- Regular
+SUNDRAMOORTHY
+142 Mrs D Assistant Professor Female M.E. 130 Yes 13-07-2022 -- Regular
+Selvamarilakshmi
+143 Mrs Piriyadharshni S Assistant Professor Female M.E. 134 Yes 02-09-2024 -- Regular
+144 Mrs Srimathi Assistant Professor Female M.E. 6 Yes 10-07-2024 -- Regular
+145 Ms Blessina preethi Assistant Professor Female M.E. 156 Yes 10-10-2024 -- Regular
+146 Ms T Pragathi Assistant Professor Female M.E. 5 Yes 03-10-2024 -- Regular
+147 PADMANATHAN K Professor Male Ph.D 204 No 10-01-2019 27-06-2025 Regular
+148 R K Kavya Assistant Professor Female M.E. 30 Yes 07-12-2022 -- Regular
+149 S Manoranjitham Associate Professor Female M.E. 166 Yes 05-07-2023 -- Regular
+150 SUBASH Assistant Professor Male M.E. 161 Yes 22-05-2019 -- Regular
+151 Amala Preyadarchane Assistant Professor Female M.E. 121 Yes 07-06-2022 -- Regular
+J
+152 Balaji Sundharam Assistant Professor Male M. Phil 144 Yes 19-11-2019 -- Regular
+153 Dr B Professor Male Ph.D 238 Yes 05-12-2022 -- Regular
+Dhanasakkaravarthi
+154 Dr I Daniel Lawrence Associate Professor Male Ph.D 174 Yes 04-08-2021 -- Regular
+155 Dr M V Ishwarya Associate Dean Female Ph.D 162 Yes 03-06-2021 -- Regular
+156 Dr P Sugumar Associate Professor Male Ph.D 142 Yes 09-06-2021 -- Regular
+157 Dr Saranya Sekar Professor Female Ph.D 72 Yes 01-07-2024 -- Regular
+158 Dr V Prabakaran Professor Male Ph.D 141 Yes 05-07-2024 -- Regular
+159 G UMADEVI Associate Professor Female M.Tech 154 Yes 15-08-2021 -- Regular
+160 K CHANDRAKUMARI Assistant Professor Female M.E. 151 Yes 03-08-2022 -- Regular
+161 Kavitha Rani T Associate Professor Female M. Phil 188 No 07-12-2022 25-06-2025 Regular
+162 Marimuthu K Assistant Professor Male M.E. 192 Yes 10-07-2024 -- Regular
+163 Mr Ganesh Assistant Professor Male M.E. 68 Yes 24-10-2022 -- Regular
+164 Mr R Arivazhagan Assistant Professor Male M.E. 97 Yes 14-06-2021 -- Regular
+165 Mr Saravanan k Assistant Professor Male M.E. 156 Yes 16-06-2021 -- Regular
+166 Mrs Mehjabeen U Assistant Professor Female M.E. 246 Yes 05-08-2024 -- Regular
+167 Mrs Indhumathi V Assistant Professor Female M.E. 12 Yes 12-06-2024 -- Regular
+168 Mrs Remya O C Assistant Professor Female M.E. 216 Yes 01-06-2022 -- Regular
+169 Mrs T LEONILA Assistant Professor Female M.E. 126 Yes 08-06-2022 -- Regular
+170 Ms KARTHIGA Assistant Professor Female M.E. 166 Yes 02-01-2017 -- Regular
+
+## Page 10
+
+171 P Abinaya Assistant Professor Female Ph.D 30 Yes 04-01-2023 -- Regular
+172 R Beaula Jasmine Associate Dean Female Ph.D 222 Yes 16-06-2021 -- Regular
+173 Rupavathy Ravi Assistant Professor Female M.E. 101 Yes 01-12-2023 -- Regular
+174 S Venkateswaran Assistant Professor Male M.E. 91 Yes 04-08-2021 -- Regular
+175 YOHEESWARAN E Assistant Professor Male M.E. 139 Yes 16-12-2019 -- Regular

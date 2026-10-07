@@ -10,3 +10,10 @@ gspread==6.1.4
 google-auth==2.37.0
 openpyxl>=3.1
 pdfplumber>=0.11
+
+# scrape_website.py only (refreshing knowledge_base/website/ from act.edu.in) —
+# not imported by the running backend
+requests>=2.32
+beautifulsoup4>=4.12
+lxml>=5
+pypdfium2>=4  # splits scanned PDFs into 10-page parts for Sarvam OCR

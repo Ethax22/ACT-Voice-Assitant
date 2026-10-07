@@ -28,3 +28,6 @@ nohup.out
 
 # Student ERP data (marks/attendance) - never commit
 docs/ERP Data/
+
+# Retriever chunk-embedding cache — derived data, rebuilt automatically
+rag-backend/.embedding_cache*.npz

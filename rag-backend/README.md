@@ -61,5 +61,14 @@ like fees, cutoffs, and placement packages should be re-verified with
 Prakash/admissions before the pilot, since these change yearly and third-party
 sources disagreed on exact numbers (e.g., highest package reported).
 
-To add more content: drop additional `.md` files into `knowledge_base/` — they
-are re-ingested and re-embedded every time the process starts.
+To add more content: drop additional `.md` files into `knowledge_base/` (any
+subfolder) — they are re-ingested and re-embedded every time the process
+starts, or on `POST /admin/reload-knowledge`.
+
+`knowledge_base/website/` is a generated mirror of act.edu.in (every page, plus
+the text of linked PDFs) — don't hand-edit it. Refresh it when the college site
+changes with `python scrape_website.py`, then restart or reload. See that
+script's docstring for what is and isn't captured;
+`knowledge_base/website/_documents_report.txt` lists each linked PDF and
+whether its text was ingested. Scanned PDFs are skipped unless listed in the
+script's `OCR_DOC_RE`, which sends them to Sarvam Document Intelligence.

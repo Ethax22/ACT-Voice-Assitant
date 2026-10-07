@@ -299,7 +299,7 @@ async def _build_full_messages(messages: list[dict], voice: bool = False) -> lis
     user_turns = [m["content"] for m in messages if m.get("role") == "user"]
     query = _retrieval_query(user_turns) if user_turns else messages[-1]["content"]
     t0 = time.perf_counter()
-    context = await retriever.search(query, top_k=4)
+    context = await retriever.search(query)
     logger.info("[timing] retrieval %.0f ms (query %d chars)",
                 (time.perf_counter() - t0) * 1000, len(query))
     return [

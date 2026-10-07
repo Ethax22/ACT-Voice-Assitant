@@ -28,6 +28,8 @@ time real requests arrive on uvicorn's actual server loop — every later
 embedding call would silently fail. Lazy init keeps everything on one loop.
 """
 import asyncio
+import hashlib
+import logging
 import os
 from collections import OrderedDict
 from pathlib import Path
@@ -38,9 +40,19 @@ from openai import AsyncAzureOpenAI
 
 from data_loader import load_all_data
 
+logger = logging.getLogger("rag_backend.retriever")
+
 KNOWLEDGE_BASE_DIR = Path(__file__).parent / "knowledge_base"
+# Chunk embeddings kept across restarts. With knowledge_base/website/ the index
+# is ~3,000 chunks, which takes minutes to embed from scratch (Azure rate
+# limits); with this, a restart only embeds chunks whose text changed.
+EMBEDDING_CACHE_FILE = Path(__file__).parent / ".embedding_cache.npz"
 CHUNK_TOKENS = 500
 CHUNK_OVERLAP_TOKENS = 50
+# The generated mirror of act.edu.in (scrape_website.py). Everything outside it
+# — the hand-written top-level .md files and admissions-supplied data tables —
+# is the curated pool.
+WEBSITE_DIR = KNOWLEDGE_BASE_DIR / "website"
 QUERY_CACHE_SIZE = 256
 
 _encoding = tiktoken.get_encoding("cl100k_base")
@@ -71,6 +83,7 @@ class Retriever:
         )
         self._chunks: list[str] = []
         self._embeddings: np.ndarray | None = None
+        self._is_website: np.ndarray = np.zeros(0, dtype=bool)
         self._query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._ingest_lock = asyncio.Lock()
         self._ingested = False
@@ -98,12 +111,50 @@ class Retriever:
         """Build the full chunk set, then swap it in atomically — a failed
         rebuild (e.g. embedding error) leaves the previous index serving."""
         chunks: list[str] = []
-        for file_path in sorted(KNOWLEDGE_BASE_DIR.glob("*.md")):
+        is_website: list[bool] = []
+        # rglob: knowledge_base/website/ (see scrape_website.py) is nested by section.
+        for file_path in sorted(KNOWLEDGE_BASE_DIR.rglob("*.md")):
             text = file_path.read_text(encoding="utf-8")
-            chunks.extend(_chunk_text(text))
+            file_chunks = _chunk_text(text)
+            # A long page's later chunks would otherwise be anonymous text —
+            # "Semester 3: ..." with nothing saying which department's syllabus.
+            title = text.split("\n", 1)[0].strip()
+            if title.startswith("# "):
+                file_chunks[1:] = [f"{title} (continued)\n{c}" for c in file_chunks[1:]]
+            chunks.extend(file_chunks)
+            is_website.extend([WEBSITE_DIR in file_path.parents] * len(file_chunks))
         chunks.extend(await asyncio.to_thread(load_all_data))
-        embeddings = await self._embed_batched(chunks) if chunks else None
+        is_website.extend([False] * (len(chunks) - len(is_website)))
+        embeddings = await self._embed_chunks(chunks) if chunks else None
         self._chunks, self._embeddings = chunks, embeddings
+        self._is_website = np.array(is_website, dtype=bool)
+
+    async def _embed_chunks(self, chunks: list[str]) -> np.ndarray:
+        """Embed chunks, re-using vectors cached on disk for unchanged text."""
+        keys = [
+            hashlib.sha1(f"{self._embedding_deployment}\n{c}".encode()).hexdigest()
+            for c in chunks
+        ]
+        cached: dict[str, np.ndarray] = {}
+        try:
+            with np.load(EMBEDDING_CACHE_FILE) as f:
+                cached = dict(zip(f["keys"].tolist(), f["vectors"]))
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.exception("Unreadable embedding cache — re-embedding everything")
+        missing = [i for i, k in enumerate(keys) if k not in cached]
+        if missing:
+            logger.info("Embedding %d new/changed chunk(s) of %d", len(missing), len(chunks))
+            fresh = await self._embed_batched([chunks[i] for i in missing])
+            cached.update((keys[i], v) for i, v in zip(missing, fresh))
+        vectors = np.vstack([cached[k] for k in keys])
+        if missing or len(cached) != len(set(keys)):  # new vectors, or stale ones to drop
+            # ".npz" suffix required: np.savez appends it to any other name.
+            tmp = EMBEDDING_CACHE_FILE.with_name(EMBEDDING_CACHE_FILE.stem + ".tmp.npz")
+            np.savez(tmp, keys=np.array(keys), vectors=vectors)
+            os.replace(tmp, EMBEDDING_CACHE_FILE)
+        return vectors
 
     async def _embed_batched(self, texts: list[str], batch: int = 96) -> np.ndarray:
         parts = [await self._embed(texts[i : i + batch]) for i in range(0, len(texts), batch)]
@@ -136,7 +187,15 @@ class Retriever:
         """Ingest now instead of on the first visitor's request."""
         await self._ensure_ingested()
 
-    async def search(self, query: str, top_k: int = 4) -> str:
+    async def search(self, query: str, curated_k: int = 4, website_k: int = 3) -> str:
+        """Top chunks from the curated pool AND, separately, from the website
+        mirror — not one combined ranking. The mirror is ~300x larger (over
+        half of it syllabus text), and in a single ranking it buries the
+        curated answers: measured on "what is the counselling code?", the
+        curated chunk holding the answer ranked 1,277th of 3,054. Ranking the
+        small curated pool on its own keeps the behaviour it had before the
+        mirror existed; the mirror then adds detail the curated files lack.
+        Curated chunks come first in the returned context."""
         await self._ensure_ingested()
 
         if not self._chunks or self._embeddings is None:
@@ -144,8 +203,11 @@ class Retriever:
 
         query_vec = await self._embed_query(query)
         scores = self._embeddings @ query_vec
-        top_indices = np.argsort(-scores)[:top_k]
-        return "\n\n---\n\n".join(self._chunks[i] for i in top_indices)
+        picked: list[int] = []
+        for pool, k in ((~self._is_website, curated_k), (self._is_website, website_k)):
+            pool_indices = np.flatnonzero(pool)
+            picked.extend(pool_indices[np.argsort(-scores[pool_indices])[:k]])
+        return "\n\n---\n\n".join(self._chunks[i] for i in picked)
 
 
 retriever = Retriever()
