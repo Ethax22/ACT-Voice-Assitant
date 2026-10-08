@@ -32,6 +32,7 @@ copy-paste-final code.
 | Lead capture (Phase 8) | ✅ Built and wired to Google Sheets (updated 2026-10-06). `capture_lead` triggers on name+phone in typed chat and the voice/streaming path (no tool-call chunks leak to the voice pipeline), phone numbers are validated, and `rag-backend/.env` has `GOOGLE_SERVICE_ACCOUNT_JSON` + `LEADS_SHEET_ID` set. A phone call through the Calling Agent also produced a lead with `source=phone`, so the Sheet write works. Not yet confirmed from a real website-widget visitor (only dev tests). |
 | Sensitive-question handling (Phase 9) | 🟡 Plumbing built and verified live (`rag-backend/knowledge_base/sensitive_topics.md` retrieved automatically, system prompt prefers "Talking point:" sections near-verbatim, correctly avoids leaking unfinished-content editor notes and avoids fabricating numbers it doesn't have) — **content itself is still draft placeholder text**, not the real admissions/faculty-approved wording CLAUDE.md requires. Needs Prakash/admissions to fill in each `[ADMISSIONS: ...]` bracket in that file before launch. |
 | Logging (Phase 10) | 🟡 Built. Typed chat: verified live end-to-end (`rag-backend/conversation_logger.py`, transcript written and 90-day pruning tested with a synthetic old folder). Voice: `voice-pipeline/conversation_logger.py`'s `TranscriptLogger` + Pipecat's `AudioBufferProcessor` are wired into the pipeline and confirmed to link correctly in a dry (no real audio) pipeline-construction test — **not yet confirmed with a real voice call**, since that needs actual audio flowing through, same category of human-verification gap as Phases 4-6. |
+| Sentiment report (added 2026-10-07) | 🟡 Built — `rag-backend/sentiment_report.py` reads saved typed-chat and voice transcripts, has Sarvam 105B label each conversation, and writes an HTML + CSV report to `rag-backend/reports/`. Run once on 48 dev-test conversations. Labels are **not validated** against hand-labelled conversations (English or Tamil), and the "unanswered questions" field is noisy. Run by hand; no schedule. See §11a. |
 | Topic voices + mid-call language switch (added 2026-09-29) | 🟡 `voice-pipeline/conversation_router.py` picks a different Sarvam voice per topic (about us / admissions / courses / placements) and switches STT/TTS/persona language mid-call via live settings-update frames. Tamil keywords and switch phrases are a first pass, not native-speaker verified. |
 | Voice latency work | 🟡 `voice-pipeline/latency_metrics.py` logs per-turn `[latency]` lines (STT/LLM/TTS first byte, user-stopped → bot-audio). Backend first word measured ≈ 1.7 s over HTTP (retrieval ≈ 0.3–0.45 s, Sarvam 105B first token ≈ 0.4 s); a retrieval-query cache was added. **No real voice-call numbers yet** — tuning of VAD silence, TTS buffers and answer length waits on them (see `docs/Session_Handoff_ERP_CallAgent_VoiceLatency.md` §6). |
 | Calling Agent (separate product, not built in this repo) | 🟡 Runs on Sarvam Indus, not DIY. Reaches this repo only via `POST /calling-agent/ask` (shared brain + lead capture). Real inbound call tested: answers, Tamil/English, ERP lookup (separate service, fake contacts), lead capture, transfer. Not launch-ready (hosting, real ERP data, transfer-routing retest, consent/retention sign-off); outbound and sentiment not started. See `docs/Calling_Agent_Build_Plan.md` and the 2026-10-05 handoff. |
@@ -311,6 +312,38 @@ Decided 2026-09-26: **local disk, 90-day retention.**
   constraint to check against) — local disk is the right starting point at
   current expected volume, not necessarily the permanent answer.
 
+## 11a. Sentiment report (website bot) — added 2026-10-07
+
+Decided 2026-10-07: the website bot gets a sentiment report. This supersedes
+the Website Voice Bot doc, which listed sentiment as out of scope for the web
+bot. What stays out of scope here is **real-time** scoring during a call —
+that remains the Calling Agent's requirement, in its own codebase.
+
+- `rag-backend/sentiment_report.py` — a script run by hand
+  (`python sentiment_report.py --days 7`, or `--from`/`--to`). It reads the
+  Phase 10 transcripts from both `rag-backend/logs/` and
+  `voice-pipeline/logs/`, so it adds nothing to reply latency.
+- One Sarvam 105B call per conversation (same vendor as everything else)
+  returns: sentiment (positive/neutral/negative), mood change
+  (improved/steady/worsened), admission interest (high/medium/low/none),
+  frustration + reason, questions the bot failed to answer, topics, and a
+  one-sentence summary. Phone numbers and emails are masked in the output.
+- Each result is cached as `sentiment.json` beside its transcript, keyed by a
+  hash of the conversation, so re-runs only pay for new conversations and
+  the cache is removed by the existing 90-day log prune.
+- Output: `rag-backend/reports/sentiment_<from>_to_<to>.html` and `.csv`
+  (git-ignored — visitor data; pruned after 90 days on each run).
+
+**Still needed before the numbers can be relied on:**
+- Check the labels against a set of conversations labelled by hand, Tamil
+  included — same requirement the Calling Agent plan sets for its own
+  sentiment scoring.
+- The "unanswered questions" field varied a lot with prompt wording during
+  the build (7 to 28 of 48 conversations) and sometimes listed questions the
+  bot did answer. Treat it as a hint until tuned against real data.
+- Decide whether it should run on a schedule or be shown anywhere other than
+  the local report file.
+
 ## 12. Phase 11 — Consistency QA
 
 - Run the same ~20–30 question test set (from the PRD) through typed chat,
@@ -370,3 +403,6 @@ Decided 2026-09-26: **local disk, 90-day retention.**
 5. **Voice IDs:** launch v1 on Sarvam's current default voices already in
    `pipeline.py`; voice cloning (Phase 7) is a deferred fast-follow, not a
    launch blocker (§8).
+6. **Sentiment (decided 2026-10-07):** the website bot gets a
+   post-conversation sentiment report built from saved transcripts (§11a);
+   real-time sentiment scoring stays with the Calling Agent.

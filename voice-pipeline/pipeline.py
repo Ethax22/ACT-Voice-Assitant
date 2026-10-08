@@ -29,13 +29,16 @@ PERSONA_PROMPTS: dict[Language, str] = {
         "You are Agni AI, the voice assistant for Agni College of Technology. "
         "Talk like a helpful senior student showing someone around campus: warm, "
         "direct, and brief. Keep answers short since this is a spoken "
-        "conversation, not a lookup. Respond in English."
+        "conversation, not a lookup. Respond in English.\n"
+        # Read by rag-backend (main.py's _reply_language), which enforces it.
+        "reply_language: en"
     ),
     "ta": (
         "You are Agni AI, the voice assistant for Agni College of Technology. "
         "Talk like a helpful senior student showing someone around campus: warm, "
         "direct, and brief. Keep answers short since this is a spoken "
-        "conversation, not a lookup. Respond in Tamil."
+        "conversation, not a lookup. Respond in Tamil.\n"
+        "reply_language: ta"
     ),
 }
 
@@ -177,6 +180,15 @@ CLONED_VOICE_IDS: dict[str, str | None] = {
 }
 
 
+def _optional_float_settings(**env_names: str) -> dict[str, float]:
+    """{setting: float(env value)} for each named env var that is set."""
+    return {
+        setting: float(os.environ[env])
+        for setting, env in env_names.items()
+        if os.environ.get(env, "").strip()
+    }
+
+
 def build_pipeline(websocket, language: Language, session_id: str):
     """Builds the Pipecat pipeline for one browser voice session.
 
@@ -207,6 +219,8 @@ def build_pipeline(websocket, language: Language, session_id: str):
     from conversation_router import ConversationRouter, ConversationRouterCallbacks, TOPIC_VOICES
     from latency_metrics import LatencyLogger
     from raw_pcm_serializer import RawPCMSerializer
+    from speech_text_filter import to_speech
+    from turn_taking import build_user_aggregator_params, stt_silence_duration_ms
 
     sarvam_api_key = os.environ["SARVAM_API_KEY"]
     rag_backend_public_url = os.environ["RAG_BACKEND_PUBLIC_URL"].rstrip("/")
@@ -243,7 +257,9 @@ def build_pipeline(websocket, language: Language, session_id: str):
             model=STT_MODEL,
             language_code=language_code,
             threshold=VAD_TUNING["threshold"],
-            silence_duration_ms=VAD_TUNING["silence_duration_ms"],
+            # Shortened when turn_taking.py's local VAD decides turns — see
+            # stt_silence_duration_ms.
+            silence_duration_ms=stt_silence_duration_ms(VAD_TUNING["silence_duration_ms"]),
             min_speech_duration_ms=VAD_TUNING["min_speech_duration_ms"],
         ),
     )
@@ -253,6 +269,9 @@ def build_pipeline(websocket, language: Language, session_id: str):
     llm = OpenAILLMService(
         api_key=rag_backend_auth_key,
         base_url=f"{rag_backend_public_url}/v1",
+        # Lets rag-backend's conversation_state remember per-call facts the
+        # message history can't show (a lead already saved on this call).
+        default_headers={"X-Session-Id": session_id},
         settings=OpenAILLMService.Settings(
             model="agni-ai",  # ignored by our backend, which always uses its own Sarvam 105B model
             system_instruction=PERSONA_PROMPTS[language],
@@ -270,6 +289,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # Tamil/kavya in earlier testing.
     stock_tts = SarvamTTSService(
         api_key=sarvam_api_key,
+        text_transforms=[("*", to_speech)],
         settings=SarvamTTSService.Settings(
             model=TTS_MODEL,
             voice=TOPIC_VOICES[language]["about-us"],
@@ -287,8 +307,15 @@ def build_pipeline(websocket, language: Language, session_id: str):
             # reply's first words take too long to start. This is a
             # reasoned experiment, not a verified fix — needs a real listen
             # to confirm, same as the VAD tuning.
-            min_buffer_size=120,
-            max_chunk_length=300,
+            # Env-overridable so buffer settings can be A/B tested against
+            # the [latency] log lines without a code edit.
+            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "120")),
+            max_chunk_length=int(os.environ.get("TTS_MAX_CHUNK_LENGTH", "300")),
+            # Voice tuning (step J): unset = Sarvam's own defaults. pace is a
+            # speed multiplier (0.5-2.0), temperature the variation in
+            # delivery (0.01-1.0) — ranges per the installed Pipecat's
+            # bulbul:v3 config. To be chosen by ear, not from code.
+            **_optional_float_settings(pace="TTS_PACE", temperature="TTS_TEMPERATURE"),
         ),
     )
 
@@ -347,7 +374,9 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # always injects its own persona + retrieved context server-side, so
     # this only matters for staying off Pipecat's deprecated path.
     context = LLMContext(messages=[])
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context, user_params=build_user_aggregator_params(language)
+    )
 
     # 2026-09-29: per-topic voice switching + mid-call language switching —
     # see conversation_router.py's module docstring. Sits between STT and

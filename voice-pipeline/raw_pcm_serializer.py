@@ -20,7 +20,13 @@ independent case in the same serializer, not a replacement.
 """
 import json
 
-from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame, OutputTransportMessageFrame
+from pipecat.frames.frames import (
+    Frame,
+    InputAudioRawFrame,
+    InterruptionFrame,
+    OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+)
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
@@ -34,6 +40,13 @@ class RawPCMSerializer(FrameSerializer):
             return frame.audio
         if isinstance(frame, OutputTransportMessageFrame):
             return json.dumps(frame.message)
+        if isinstance(frame, InterruptionFrame):
+            # Barge-in: FastAPIWebsocketOutputTransport hands the serializer
+            # every InterruptionFrame. The server has already stopped the
+            # LLM/TTS, but it sends audio at up to 2x real time, so the browser
+            # is still holding queued chunks — this tells the widget to drop
+            # them (its existing 'UserStartedSpeaking' handler -> stopPlayback()).
+            return json.dumps({"type": "UserStartedSpeaking"})
         return None
 
     async def deserialize(self, data):

@@ -72,7 +72,7 @@ async def detect_language(pcm16_audio: bytes, sample_rate: int = 16000) -> str |
 
 
 async def detect_language_and_transcript(
-    pcm16_audio: bytes, sample_rate: int = 16000
+    pcm16_audio: bytes, sample_rate: int = 16000, min_confidence: float = MIN_CONFIDENCE
 ) -> tuple[str | None, str | None]:
     """Same batch call as detect_language, but also returns the transcript.
 
@@ -103,7 +103,7 @@ async def detect_language_and_transcript(
     if not language_code:
         return None, None
     confidence = data.get("language_probability")
-    if confidence is not None and confidence < MIN_CONFIDENCE:
+    if confidence is not None and confidence < min_confidence:
         return None, None
     short_code = language_code.split("-")[0]
     if short_code not in SUPPORTED_LANGUAGES:

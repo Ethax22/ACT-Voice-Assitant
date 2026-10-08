@@ -448,34 +448,30 @@
       <div class="topic-grid">
         <div class="topic-card"
              data-avatar="about-us"
-             data-topic-en="Tell me about Agni — what makes it a good college?"
-             data-topic-ta="அக்னி பற்றி சொல்லுங்கள் — இது ஏன் சிறந்த கல்லூரி?">
+             data-topic-en="Tell me about Agni — what makes it a good college?">
           <img class="topic-avatar" src="assets/about-us-idle.png" alt="About Us">
-          <span data-label-en="About Us" data-label-ta="எங்களை பற்றி">About Us</span>
+          <span>About Us</span>
         </div>
 
         <div class="topic-card"
              data-avatar="courses"
-             data-topic-en="What courses does Agni offer?"
-             data-topic-ta="அக்னி எந்த படிப்புகளை வழங்குகிறது?">
+             data-topic-en="What courses does Agni offer?">
           <img class="topic-avatar" src="assets/courses-idle.png" alt="Courses">
-          <span data-label-en="Courses" data-label-ta="படிப்புகள்">Courses</span>
+          <span>Courses</span>
         </div>
 
         <div class="topic-card"
              data-avatar="admissions"
-             data-topic-en="How do I get admission into Agni?"
-             data-topic-ta="அக்னியில் சேர்க்கை பெறுவது எப்படி?">
+             data-topic-en="How do I get admission into Agni?">
           <img class="topic-avatar" src="assets/admissions-idle.png" alt="Admissions">
-          <span data-label-en="Admissions" data-label-ta="சேர்க்கை">Admissions</span>
+          <span>Admissions</span>
         </div>
 
         <div class="topic-card"
              data-avatar="placements"
-             data-topic-en="Tell me about placements at Agni."
-             data-topic-ta="அக்னியில் வேலைவாய்ப்பு பற்றி சொல்லுங்கள்.">
+             data-topic-en="Tell me about placements at Agni.">
           <img class="topic-avatar" src="assets/placements-idle.png" alt="Placements">
-          <span data-label-en="Placements" data-label-ta="வேலைவாய்ப்பு">Placements</span>
+          <span>Placements</span>
         </div>
       </div>
 
@@ -615,69 +611,19 @@
   const chatLog = document.getElementById('chatLog');
   const sendBtn = document.getElementById('sendBtn');
 
-  // Language is fully automatic (CLAUDE.md decision #5, updated 2026-09-23
-  // for auto-detect-by-default, then 2026-09-29 to drop the manual toggle
-  // entirely once auto-detect proved reliable enough on its own): typed
-  // chat detects Tamil vs. English from the input text's script; voice
-  // detects it from a short initial mic snippet at call start, AND
-  // continuously re-detects per turn mid-call (voice-pipeline's
-  // ConversationRouter.maybe_auto_switch_language), so switching languages
-  // mid-conversation just means starting to speak the other one.
-  let currentLanguage = 'en';
-
-  // Tamil script lives in the U+0B80–U+0BFF Unicode block. A single Tamil
-  // character in an otherwise-English message is enough to treat the whole
-  // message as Tamil — visitors don't typically mix scripts mid-sentence,
-  // and requiring a majority would misclassify a short Tamil message that
-  // happens to include an English loanword or acronym.
-  const TAMIL_SCRIPT_PATTERN = /[஀-௿]/;
-
-  function detectScriptLanguage(text) {
-    return TAMIL_SCRIPT_PATTERN.test(text) ? 'ta' : 'en';
-  }
-
+  // The widget's own wording is English only (2026-10-08, at Prakash's
+  // request). The conversation language is still automatic (CLAUDE.md
+  // decision #5): the backend answers a typed message in its own language,
+  // and voice detects the language from a short mic snippet at call start,
+  // then re-detects mid-call (voice-pipeline's
+  // ConversationRouter.maybe_auto_switch_language).
   const UI_TEXT = {
-    en: {
-      prompt: 'What would you like to know?',
-      divider: 'or type your question',
-      placeholder: 'Ask about admissions, courses...',
-      talk: "Let's Talk",
-    },
-    ta: {
-      prompt: 'நீங்கள் எதை தெரிந்துகொள்ள விரும்புகிறீர்கள்?',
-      divider: 'அல்லது உங்கள் கேள்வியை தட்டச்சு செய்யவும்',
-      placeholder: 'சேர்க்கை, படிப்புகள் பற்றி கேளுங்கள்...',
-      talk: 'பேசலாம்',
-      connecting: 'இணைக்கிறது…',
-      endCall: 'அழைப்பை முடி',
-    },
+    talk: "Let's Talk",
+    connecting: 'Connecting…',
+    endCall: 'End Call',
   };
-  UI_TEXT.en.connecting = 'Connecting…';
-  UI_TEXT.en.endCall = 'End Call';
 
-  const promptLabel = document.getElementById('promptLabel');
-  const dividerLabelSpan = document.getElementById('dividerLabel').querySelector('span');
   const talkBtnLabel = document.getElementById('talkBtnLabel');
-
-  // Language is fully automatic now (2026-09-29) — the manual EN/தமிழ்
-  // toggle was removed once auto-detect (typed: script detection; voice:
-  // Sarvam batch STT, both at call start AND per-turn mid-call via
-  // voice-pipeline's ConversationRouter.maybe_auto_switch_language) proved
-  // reliable enough on its own. applyLanguage() only updates UI text now —
-  // it no longer has a toggle to keep in sync with.
-  function applyLanguage(lang) {
-    currentLanguage = lang;
-    const t = UI_TEXT[lang];
-    promptLabel.textContent = t.prompt;
-    dividerLabelSpan.textContent = t.divider;
-    chatInput.placeholder = t.placeholder;
-    if (!voiceActive) talkBtnLabel.textContent = t.talk;
-
-    topicCards.forEach((card) => {
-      const span = card.querySelector('span');
-      span.textContent = lang === 'en' ? span.dataset.labelEn : span.dataset.labelTa;
-    });
-  }
 
   // Keep the full conversation here — sending only the latest message would
   // make follow-ups like "what about ECE?" lose their context.
@@ -694,13 +640,9 @@
   async function sendMessage(message) {
     if (!message) return;
 
-    // Auto-detect (Phase 6): a typed message's script decides the UI
-    // language for this and future turns. A topic-card click sends fixed
-    // starter text in whatever language is already active, so it never
-    // itself changes detection — only a visitor's own typed words do.
-    const detected = detectScriptLanguage(message);
-    if (detected !== currentLanguage) applyLanguage(detected);
-
+    // The widget's own wording stays English whatever language the visitor
+    // types in (2026-10-08, at Prakash's request) — the backend still
+    // answers in the language of the message itself.
     addBubble(message, 'user');
     conversationHistory.push({ role: 'user', content: message });
     statusLine.textContent = 'Agni AI is thinking...';
@@ -749,8 +691,7 @@
   topicCards.forEach(card => {
     card.addEventListener('click', () => {
       setActiveTopic(card.dataset.avatar);
-      const topic = currentLanguage === 'en' ? card.dataset.topicEn : card.dataset.topicTa;
-      sendMessage(topic);
+      sendMessage(card.dataset.topicEn);
     });
   });
 
@@ -785,7 +726,7 @@
   let micStream = null;
   let micAudioCtx = null;
   let micSource = null;
-  let micProcessor = null;
+  let micDetachCapture = null;
   let playbackCtx = null;
   let playbackSampleRate = 24000;
   let nextPlayTime = 0;
@@ -793,6 +734,9 @@
   let playbackKeepAliveInterval = null;
   let speakingSilenceTimer = null;
   let currentTurnReplyText = '';
+  // True whenever a reply's first audio chunk is still to come (call start,
+  // and after each interruption / end of the previous reply).
+  let awaitingReplyAudio = true;
 
   function downsampleTo16k(float32Input, inputSampleRate) {
     if (inputSampleRate === MIC_SEND_SAMPLE_RATE) return float32Input;
@@ -865,6 +809,13 @@
       scheduledSources.push(source);
 
       const startAt = Math.max(nextPlayTime, playbackCtx.currentTime);
+      if (awaitingReplyAudio) {
+        awaitingReplyAudio = false;
+        // Browser's share of time-to-first-audio: chunk arrival -> audible.
+        // Add it to voice-pipeline's "user stopped -> bot audio starts" line.
+        const waitMs = (startAt - playbackCtx.currentTime + (playbackCtx.outputLatency || playbackCtx.baseLatency || 0)) * 1000;
+        console.info(`[latency] reply's first audio chunk audible ~${waitMs.toFixed(0)}ms after it arrived`);
+      }
       source.start(startAt);
       nextPlayTime = startAt + audioBuffer.duration;
       console.debug(`Agni AI: scheduled ${arrayBuffer.byteLength}B chunk at ctx time ${startAt.toFixed(3)} (ctx.currentTime=${playbackCtx.currentTime.toFixed(3)}, state=${playbackCtx.state})`);
@@ -873,8 +824,9 @@
     }
   }
 
-  // Barge-in: called when Deepgram reports the user has started speaking
-  // again while Agni AI's reply is still queued/playing. Without this, every
+  // Barge-in: called when voice-pipeline reports an interruption (its
+  // RawPCMSerializer sends 'UserStartedSpeaking' on every Pipecat
+  // InterruptionFrame) while Agni AI's reply is still queued/playing. Without this, every
   // already-scheduled chunk (queued via the gapless-playback scheduling in
   // playPcm16Chunk above) keeps playing to completion regardless of the
   // user talking over it — true half-duplex behavior that makes the
@@ -887,11 +839,67 @@
     }
     scheduledSources = [];
     if (playbackCtx) nextPlayTime = playbackCtx.currentTime;
+    awaitingReplyAudio = true;
   }
 
   function setTalkButtonState(label) {
     const label_el = talkBtn.querySelector('span');
     if (label_el) label_el.textContent = label;
+  }
+
+  // Mic capture. An AudioWorklet posts ~20ms blocks straight off the audio
+  // thread; the old ScriptProcessor(4096) path held back ~85-90ms of speech
+  // per chunk before anything was sent. ScriptProcessor stays as the fallback
+  // for browsers/contexts where the worklet can't load. Either way
+  // `onSamples` gets Float32 samples at the context's own rate, and the
+  // returned function detaches the capture.
+  const MIC_WORKLET_SOURCE = `
+    class AgniMicCapture extends AudioWorkletProcessor {
+      constructor() {
+        super();
+        this.size = Math.round(sampleRate * 0.02);
+        this.buf = new Float32Array(this.size);
+        this.filled = 0;
+      }
+      process(inputs) {
+        const channel = inputs[0] && inputs[0][0];
+        if (!channel) return true;
+        let i = 0;
+        while (i < channel.length) {
+          const take = Math.min(channel.length - i, this.size - this.filled);
+          this.buf.set(channel.subarray(i, i + take), this.filled);
+          this.filled += take;
+          i += take;
+          if (this.filled === this.size) {
+            this.port.postMessage(this.buf.buffer, [this.buf.buffer]);
+            this.buf = new Float32Array(this.size);
+            this.filled = 0;
+          }
+        }
+        return true;
+      }
+    }
+    registerProcessor('agni-mic-capture', AgniMicCapture);
+  `;
+
+  async function attachMicCapture(ctx, source, onSamples) {
+    if (ctx.audioWorklet && window.AudioWorkletNode) {
+      try {
+        const url = URL.createObjectURL(new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }));
+        try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+        const node = new AudioWorkletNode(ctx, 'agni-mic-capture', { numberOfInputs: 1, numberOfOutputs: 0 });
+        node.port.onmessage = (event) => onSamples(new Float32Array(event.data));
+        source.connect(node);
+        return () => { node.port.onmessage = null; node.disconnect(); };
+      } catch (err) {
+        console.warn('Agni AI: AudioWorklet mic capture unavailable, falling back to ScriptProcessor:', err);
+      }
+    }
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    processor.onaudioprocess = (event) => onSamples(event.inputBuffer.getChannelData(0));
+    source.connect(processor);
+    processor.connect(ctx.destination);
+    return () => { processor.onaudioprocess = null; processor.disconnect(); };
   }
 
   function concatArrayBuffers(buffers) {
@@ -916,15 +924,15 @@
     return new Promise((resolve) => {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const source = ctx.createMediaStreamSource(stream);
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
       const chunks = [];
       let sampleCount = 0;
       let settled = false;
+      let detachCapture = null;
 
       const finish = async () => {
         if (settled) return;
         settled = true;
-        processor.disconnect();
+        if (detachCapture) detachCapture();
         source.disconnect();
         ctx.close();
         const combined = concatArrayBuffers(chunks);
@@ -945,16 +953,15 @@
         resolve({ language, chunks });
       };
 
-      processor.onaudioprocess = (event) => {
-        const input = event.inputBuffer.getChannelData(0);
+      attachMicCapture(ctx, source, (input) => {
+        if (settled) return;
         const downsampled = downsampleTo16k(input, ctx.sampleRate);
         chunks.push(floatTo16BitPCM(downsampled));
         sampleCount += downsampled.length;
         if (sampleCount >= DETECTION_SAMPLES) finish();
-      };
-
-      source.connect(processor);
-      processor.connect(ctx.destination);
+      }).then((detach) => {
+        if (settled) detach(); else detachCapture = detach;
+      });
 
       // Safety net: if the visitor cancels (End Call) or the mic feed dies
       // mid-detection, onaudioprocess may never reach DETECTION_SAMPLES —
@@ -967,7 +974,7 @@
 
   async function startVoiceSession() {
     voiceActive = true;
-    setTalkButtonState(UI_TEXT[currentLanguage].connecting);
+    setTalkButtonState(UI_TEXT.connecting);
 
     // Create (and resume) the playback AudioContext HERE, synchronously,
     // before any `await` — including getUserMedia's permission prompt and
@@ -1017,7 +1024,7 @@
     } catch (err) {
       statusLine.textContent = 'Microphone permission is needed for voice chat.';
       voiceActive = false;
-      setTalkButtonState(UI_TEXT[currentLanguage].talk);
+      setTalkButtonState(UI_TEXT.talk);
       if (playbackKeepAliveInterval) { clearInterval(playbackKeepAliveInterval); playbackKeepAliveInterval = null; }
       if (playbackCtx) { playbackCtx.close(); playbackCtx = null; }
       return;
@@ -1026,22 +1033,26 @@
     // Auto-detect (Phase 6): buffer a short snippet and identify its
     // language BEFORE opening a pipeline, since which pipeline to open
     // (persona, TTS voice, everything) depends on the answer. This is only
-    // the STARTING language now — voice-pipeline's ConversationRouter
-    // keeps re-detecting per turn once the call is open, so a wrong first
-    // guess (or the visitor switching languages mid-call) self-corrects
-    // without the visitor doing anything.
+    // the STARTING language — voice-pipeline's ConversationRouter re-checks
+    // mid-call only when a turn's transcript doesn't look like the session
+    // language, so a wrong first guess or a mid-call switch still corrects
+    // itself without a detection call on every turn.
     statusLine.textContent = 'Detecting language…';
     const { language, chunks: bufferedChunks } = await recordSnippetForDetection(micStream);
     if (!voiceActive) return; // cancelled (End Call) while detection was in flight
-    if (language && language !== currentLanguage) applyLanguage(language);
+    // The detected language only picks which pipeline to open — the widget's
+    // own wording stays as it is (2026-10-08, at Prakash's request), so a
+    // Tamil-speaking caller no longer flips the labels to Tamil.
+    // Falls back to English when detection is undetermined.
+    const voiceLanguage = language || 'en';
 
-    const endpoint = VOICE_ENDPOINTS[currentLanguage];
+    const endpoint = VOICE_ENDPOINTS[voiceLanguage];
     if (!endpoint) {
       // Defensive fallback — every supported language should have an entry
       // in VOICE_ENDPOINTS above. If this ever fires, typed chat still works.
       statusLine.textContent = 'Voice chat is temporarily unavailable for this language — please type your question instead.';
       voiceActive = false;
-      setTalkButtonState(UI_TEXT[currentLanguage].talk);
+      setTalkButtonState(UI_TEXT.talk);
       micStream.getTracks().forEach((t) => t.stop());
       micStream = null;
       if (playbackKeepAliveInterval) { clearInterval(playbackKeepAliveInterval); playbackKeepAliveInterval = null; }
@@ -1055,11 +1066,12 @@
     // (both languages use 24000; see VOICE_ENDPOINTS).
     if (endpoint.playbackSampleRate !== playbackSampleRate) {
       console.warn(
-        `Agni AI: ${currentLanguage} voice endpoint expects ${endpoint.playbackSampleRate}Hz playback, ` +
+        `Agni AI: ${voiceLanguage} voice endpoint expects ${endpoint.playbackSampleRate}Hz playback, ` +
         `but the AudioContext was already created at ${playbackSampleRate}Hz.`
       );
     }
 
+    awaitingReplyAudio = true;
     voiceWs = new WebSocket(endpoint.wsUrl);
     voiceWs.binaryType = 'arraybuffer';
 
@@ -1076,18 +1088,17 @@
 
       micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       micSource = micAudioCtx.createMediaStreamSource(micStream);
-      micProcessor = micAudioCtx.createScriptProcessor(4096, 1, 1);
-      micSource.connect(micProcessor);
-      micProcessor.connect(micAudioCtx.destination);
-
-      micProcessor.onaudioprocess = (event) => {
+      const captureCtx = micAudioCtx;
+      attachMicCapture(captureCtx, micSource, (input) => {
         if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) return;
-        const input = event.inputBuffer.getChannelData(0);
-        const downsampled = downsampleTo16k(input, micAudioCtx.sampleRate);
+        const downsampled = downsampleTo16k(input, captureCtx.sampleRate);
         voiceWs.send(floatTo16BitPCM(downsampled));
-      };
+      }).then((detach) => {
+        // The call may have ended while the worklet module was loading.
+        if (micAudioCtx === captureCtx) micDetachCapture = detach; else detach();
+      });
 
-      setTalkButtonState(UI_TEXT[currentLanguage].endCall);
+      setTalkButtonState(UI_TEXT.endCall);
       statusLine.textContent = "Listening… speak whenever you're ready.";
     };
 
@@ -1148,6 +1159,7 @@
         speakingSilenceTimer = setTimeout(() => {
           setSpeakingTopic(false);
           speakingSilenceTimer = null;
+          awaitingReplyAudio = true;
         }, 400);
       }
     };
@@ -1164,7 +1176,7 @@
   function stopVoiceSession() {
     voiceActive = false;
     if (playbackKeepAliveInterval) { clearInterval(playbackKeepAliveInterval); playbackKeepAliveInterval = null; }
-    if (micProcessor) { micProcessor.disconnect(); micProcessor.onaudioprocess = null; micProcessor = null; }
+    if (micDetachCapture) { micDetachCapture(); micDetachCapture = null; }
     if (micSource) { micSource.disconnect(); micSource = null; }
     if (micAudioCtx) { micAudioCtx.close(); micAudioCtx = null; }
     if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
@@ -1174,7 +1186,7 @@
     currentTurnReplyText = '';
     setSpeakingTopic(false);
     if (voiceWs) { try { voiceWs.close(); } catch (e) {} voiceWs = null; }
-    setTalkButtonState(UI_TEXT[currentLanguage].talk);
+    setTalkButtonState(UI_TEXT.talk);
     statusLine.textContent = '';
   }
 

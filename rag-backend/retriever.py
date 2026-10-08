@@ -31,9 +31,11 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 from collections import OrderedDict
 from pathlib import Path
 
+import httpx
 import numpy as np
 import tiktoken
 from openai import AsyncAzureOpenAI
@@ -77,6 +79,14 @@ class Retriever:
             api_key=os.environ["AZURE_OPENAI_API_KEY"],
             azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
             api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21"),
+            # httpx drops an idle connection after 5 s by default, and voice
+            # turns are usually further apart than that, so most queries paid
+            # for a fresh TLS handshake (measured 2026-10-07: ~290-410 ms on a
+            # warm connection vs 460-785 ms after 8 s idle).
+            http_client=httpx.AsyncClient(
+                limits=httpx.Limits(max_keepalive_connections=10, keepalive_expiry=300),
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            ),
         )
         self._embedding_deployment = os.environ.get(
             "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"
@@ -172,7 +182,8 @@ class Retriever:
         ~0.3-0.45s of every voice turn, and repeated or re-used queries
         (see main._retrieval_query) skip it entirely. Cleared on reload only
         by being keyed to the same embedding model, so it never goes stale."""
-        key = query.strip().lower()
+        # Punctuation and case vary between STT runs of the same question.
+        key = " ".join(re.sub(r"[.,!?;:\"']", " ", query.lower()).split())
         cached = self._query_cache.get(key)
         if cached is not None:
             self._query_cache.move_to_end(key)

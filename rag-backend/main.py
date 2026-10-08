@@ -18,10 +18,13 @@ The Deepgram-based English voice relay (WS /voice/en, voice_agent.py) was
 retired 2026-09-25 (CLAUDE.md decision #1) — English voice moves to the same
 Sarvam/Pipecat relay Tamil already uses, generalized in Phase 3.
 """
+import asyncio
 import json
 import logging
 import os
+import re
 import time
+from collections import OrderedDict
 
 from dotenv import load_dotenv
 
@@ -31,11 +34,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import httpx
 from openai import AsyncOpenAI
 
 from retriever import retriever
 from leads import normalize_indian_mobile, save_lead
 from conversation_logger import log_turn, prune_old_logs
+from conversation_state import derive_state, lead_already_captured, mark_lead_captured
 
 app = FastAPI(title="Agni AI RAG Backend")
 logger = logging.getLogger("rag_backend")
@@ -79,6 +84,12 @@ app.add_middleware(
 chat_client = AsyncOpenAI(
     api_key=os.environ["SARVAM_API_KEY"],
     base_url="https://api.sarvam.ai/v1",
+    # Keep the connection open between turns (httpx's default drops it after
+    # 5 s idle) — same reasoning as retriever.py's embeddings client.
+    http_client=httpx.AsyncClient(
+        limits=httpx.Limits(max_keepalive_connections=20, keepalive_expiry=300),
+        timeout=httpx.Timeout(60.0, connect=10.0),
+    ),
 )
 CHAT_MODEL = "sarvam-105b"
 # sarvam-105b has chain-of-thought reasoning ON by default (reasoning_effort
@@ -101,11 +112,13 @@ Rules:
 - Keep answers short and conversational — 2-4 sentences unless the visitor
   clearly wants detail. This matters even more for voice, where long answers
   feel like a monologue rather than a chat.
-- Start most replies with a brief, natural spoken acknowledgment ("Sure,"
-  "Good question," "Got it," "Ah, that's a good one") before the actual
-  answer. Vary the phrase — never repeat the same one two turns in a row.
-  This is what makes a reply feel like a live conversation instead of a
-  formal lookup response.
+- Answer straight away, starting with the answer itself. Never open with
+  praise or a stalling phrase — not "Good question", "That's a good one",
+  "Sure", "Certainly", "Let me check", "Let me think", "I'm looking that up",
+  or their Tamil equivalents ("நல்ல கேள்வி", "ஒரு நிமிஷம்"). Visitors hear
+  the same opener on every answer and it sounds like a recording. A brief
+  "Got it" or "Okay" is fine only when the visitor has just told you
+  something about themselves, and never in two replies running.
 - Only answer from the context below. If it's not there, say so plainly and
   suggest contacting admissions — don't guess or make up figures.
 - It's fine to ask a short clarifying question back if the visitor's question
@@ -187,7 +200,7 @@ def _detect_language(messages: list[dict]) -> str:
 
 
 async def _resolve_tool_calls(
-    messages: list[dict], assistant_message: dict, source: str
+    messages: list[dict], assistant_message: dict, source: str, session_id: str | None = None
 ) -> list[dict]:
     """Execute every capture_lead call in an assistant tool-call turn and
     return messages extended with the assistant's tool-call turn plus one
@@ -212,7 +225,13 @@ async def _resolve_tool_calls(
                     "digits back to the visitor and ask them to repeat the full "
                     "number, then call capture_lead again."
                 )
+            elif lead_already_captured(session_id, phone):
+                result = (
+                    "This lead is already recorded for this conversation — nothing "
+                    "more to save. Don't ask for their details again."
+                )
             else:
+                mark_lead_captured(session_id, phone)
                 saved = save_lead(
                     name=args.get("name", ""),
                     phone=phone,
@@ -277,42 +296,409 @@ def _retrieval_query(user_turns: list[str]) -> str:
     return latest
 
 
+# Replies that will be heard, not read. The phone agent (source "phone",
+# Sarvam Indus calling /calling-agent/ask) was left on the typed-chat style
+# until 2026-10-07 and so got 2-4 sentence answers to read out.
+_SPOKEN_SOURCES = ("voice", "phone")
+
 VOICE_BREVITY_ADDENDUM = """
 
-SPOKEN-CALL LIMIT (overrides the 2-4 sentence guideline above): this reply
-will be heard aloud, so keep it under 45 words — two short sentences, three
-at most. Lead with the single most useful fact. If the context holds a list
-(courses, facilities, recruiters, numbers), name at most 3 items and offer to
-go on. Do not recite the context, do not restate the question, and add a
-closing question only if you haven't already asked for something."""
+SPOKEN-CALL STYLE (overrides the 2-4 sentence guideline above): this reply
+will be heard aloud, on a live call.
+- Most replies should be 5 to 25 words: one or two short sentences. 45 words
+  is the hard ceiling, for when the visitor asked for detail — not the target.
+- Answer a simple question directly, with the single most useful fact first.
+- Ask at most one question per reply, and only if you haven't already asked
+  for something.
+- Use contractions and everyday words ("we've got", "you'll need"), never
+  brochure language ("we provide a comprehensive range of").
+- If the context holds a list (courses, facilities, recruiters, numbers),
+  name at most 3 items and offer to go on.
+- Don't greet again, don't restate the question, don't recite the context,
+  and don't repeat anything you've already told them."""
+
+# Repeated as the LAST message on voice calls. The style rules above sit in
+# front of several thousand characters of retrieved context and were being
+# ignored: measured 2026-10-07 on ten questions, median reply 42 words and
+# 4 of 10 over the 45-word ceiling. Restating the limit right before the
+# model answers is what brings it down.
+VOICE_FINAL_REMINDER = (
+    "You are speaking on a live voice call. Answer the visitor's last message "
+    "in at most two short sentences, about 25 words in total. Start with the "
+    "answer, not with a filler or praise. Give the one most useful fact. "
+    "Do not list more than three items. Stop there; they will ask if they want more."
+)
+
+# The reply language is decided in code and stated last, where the model
+# weighs it most. Left to the model it drifted: replies mixed English and
+# Tamil, or answered in the language of the retrieved context instead of the
+# visitor's (reported by Prakash 2026-10-07; also flagged by the sentiment
+# report on a real test call).
+LANGUAGE_RULES = {
+    "en": (
+        "Reply in English only. Do not use Tamil words or Tamil script anywhere in "
+        "the reply, even if the visitor mixed in a Tamil word or the context contains Tamil."
+    ),
+    "ta": (
+        "Reply in Tamil only, written in Tamil script, from the first word to the last. "
+        "Do not write English sentences and do not switch to English partway through. "
+        "The context is mostly in English: translate what you take from it into Tamil "
+        "instead of copying English phrases (say \"விசாலமான அறைகள்\", not \"spacious rooms\"). "
+        "Keep in English letters only what has no everyday Tamil word: the college's "
+        "name, course and degree names (B.Tech, CSE), and terms like Wi-Fi, NAAC, TNEA. "
+        # The style block higher up was not enough by itself: typed-chat replies
+        # still said "பசங்க"/"பொண்ணுங்க" until this was restated here.
+        "Use polite spoken Tamil with நீங்க/உங்க. For boys and girls always say "
+        "மாணவர்கள் and மாணவிகள் (for example: \"மாணவர்களுக்கும் மாணவிகளுக்கும் தனித்தனி "
+        "விடுதி இருக்கு\"); the words பசங்க, பையன், பையன்கள், பொண்ணு, பொண்ணுங்க, ஆம்பளை "
+        "and பொம்பளை must not appear in your reply. Use the Tamil words கல்லூரி, "
+        "படிப்பு, கட்டணம், விடுதி, சேர்க்கை, விண்ணப்பிக்க, தொடர்பு கொள்ள, தொலைபேசி எண் "
+        "instead of English words written in Tamil letters. The campus is at Thalambur, "
+        # A test reply turned "Thalambur" into "தாம்பரம்" (Tambaram, a different place).
+        "written தாழம்பூர் in Tamil — never தாம்பரம், which is a different place."
+    ),
+}
+
+# Added to the system prompt for Tamil replies. First pass, written without a
+# native speaker's review — it needs one before launch (Voice Naturalness
+# Plan, steps I/J).
+TAMIL_STYLE = """
+
+Tamil style — you are replying in Tamil:
+- Speak polite, everyday spoken Tamil, the way a helpful person at a college
+  front office talks to a parent or student: "இருக்கு", "சொல்லுங்க",
+  "பார்க்கலாம்", and always the respectful "நீங்க / உங்க".
+- No slang and nothing over-familiar or crude: never "டா", "மச்சி", "பா",
+  "ஆம்பளை", "பொம்பளை", "பசங்க", "பொண்ணுங்க". Say "மாணவர்கள்" and
+  "மாணவிகள்".
+- Not bookish either: avoid stiff written forms like "உள்ளது", "ஆகும்",
+  "வழங்கப்படுகிறது" when a spoken form exists ("இருக்கு", "கிடைக்கும்").
+- Use the ordinary Tamil word when there is one everybody uses: கட்டணம்
+  (fees), விடுதி (hostel), சேர்க்கை (admission), படிப்பு (course),
+  வேலைவாய்ப்பு (placement), நூலகம் (library), விண்ணப்பம் (application).
+  Don't spell English words out in Tamil letters ("ஹாஸ்டல்", "ஃபீஸ்",
+  "அட்மிஷன்") when such a word exists.
+- Say numbers and amounts the way they are spoken in Tamil."""
+
+_LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
+_REPLY_LANGUAGE_MARKER = re.compile(r"reply_language:\s*(en|ta)\b")
 
 
-async def _build_full_messages(messages: list[dict], voice: bool = False) -> list[dict]:
+def _reply_language(messages: list[dict]) -> str:
+    """Which single language this reply must be in.
+
+    Voice: voice-pipeline puts a `reply_language: xx` marker in its persona
+    message — the call's current language, which it tracks from the audio and
+    which is more reliable than reading a transcript's script (Tamil speech is
+    sometimes transcribed in Latin letters). Typed chat and phone: the script
+    of the visitor's most recent turn that is long enough to tell; a bare
+    "ok" or a number inherits the language of the turns before it."""
+    for m in messages:
+        if m.get("role") == "system":
+            marker = _REPLY_LANGUAGE_MARKER.search(m.get("content") or "")
+            if marker:
+                return marker.group(1)
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        text = m.get("content") or ""
+        if any(ord(ch) in TAMIL_UNICODE_BLOCK for ch in text):
+            return "ta"
+        if len(_LATIN_WORD.findall(text)) >= 3:
+            return "en"
+    return "en"
+
+
+# Both Sarvam models gave in on a fact when pushed. On a real call the visitor
+# objected to how the bot SAID a year ("you say zero zero — say two thousand")
+# and, replaying it 2026-10-07, both replied that CSE started in 2000 where the
+# knowledge base says 2001.
+FACTS_RULE = (
+    " Facts come only from the context: years, numbers, names, amounts and codes do not "
+    "change because the visitor objects, corrects you or sounds sure. If they correct how "
+    "you SAID something, apologise for the wording and restate the same fact unchanged. "
+    "If they dispute a fact, say what your information shows and suggest confirming with "
+    "admissions. Never agree to a different figure just to be agreeable."
+)
+
+# Bare acknowledgements. On their own these carry no new request — they either
+# answer the assistant's last question or just mean "go on".
+_BACKCHANNELS = frozenset({
+    "yeah", "yes", "yep", "yup", "ya", "ok", "okay", "k", "right", "alright",
+    "hmm", "hm", "mm", "mhm", "uh huh", "sure", "fine", "i see", "got it",
+    "oh", "oh okay", "ok ok", "okay okay", "cool", "nice", "correct",
+    "சரி", "ஆமா", "ஆமாம்", "ம்ம்", "ஓகே", "ஓ", "அப்படியா", "சரி சரி", "sari", "aama", "seri",
+})
+
+BACKCHANNEL_ADDENDUM = """
+
+The visitor's last turn was only a short acknowledgement. If your previous
+reply ended with a question, treat it as their answer to that question.
+Otherwise it just means "go on": reply with one short sentence — the next
+useful detail or a brief offer of what you can tell them next. Do not start
+a new long answer and do not repeat what you just said."""
+
+
+# Greetings and sign-offs: nothing in the knowledge base helps answer these.
+_SMALL_TALK = frozenset({
+    "hi", "hello", "hey", "hi there", "hello there", "good morning", "good afternoon",
+    "good evening", "thanks", "thank you", "thank you so much", "thanks a lot", "bye",
+    "goodbye", "ok thanks", "okay thanks", "ok thank you", "okay thank you", "ok bye",
+    "வணக்கம்", "நன்றி", "ரொம்ப நன்றி", "vanakkam", "nandri",
+})
+NO_LOOKUP_CONTEXT = (
+    "(No college information was looked up for this turn: the visitor has only "
+    "greeted, thanked or acknowledged you. Reply naturally in one short sentence "
+    "and, if it fits, offer to help with admissions, courses, placements or campus life.)"
+)
+
+
+def _normalize_short(text: str) -> str:
+    # Strip listed punctuation rather than [^\w\s]: \w doesn't cover Tamil
+    # vowel signs, so that would mangle "சரி".
+    return re.sub(r"[.,!?;:\"'…]", "", text or "").strip().lower()
+
+
+def _is_small_talk(text: str) -> bool:
+    normalized = _normalize_short(text)
+    return normalized in _SMALL_TALK or normalized in _BACKCHANNELS
+
+
+def _is_backchannel(text: str) -> bool:
+    return _turn_kind(text) == "ack"
+
+
+# Word-level vocabularies for turns that carry no question. The exact-phrase
+# sets above missed ordinary variations — in a real Tamil call (2026-10-07)
+# "சரிங்க ஓகேங்க", "நீங்க வச்சிருங்க" and "சரி ஓகேங்க வச்சிருங்க" each got the
+# previous answer recited again, five times running.
+_ACK_WORDS = frozenset({
+    "yeah", "yes", "yep", "yup", "ya", "ok", "okay", "k", "right", "alright", "hmm", "hm",
+    "mm", "mhm", "sure", "fine", "oh", "cool", "nice", "correct", "great", "good", "i", "see",
+    "got", "it", "that", "is", "that's", "interesting", "understood", "actually", "pretty", "really",
+    "சரி", "சரிங்க", "ஓகே", "ஓகேங்க", "ஆமா", "ஆமாம்", "ஆமாங்க", "ம்ம்", "ஓ", "ஆ", "அப்படியா",
+    "நல்லது", "பரவாயில்ல", "பரவாயில்லை", "sari", "seri", "aama",
+})
+_CLOSING_WORDS = frozenset({
+    "bye", "goodbye", "thanks", "thank", "enough", "நன்றி", "தேங்க்ஸ்", "போதும்",
+    "புரிஞ்சுச்சு", "புரிஞ்சது", "புரிந்தது", "nandri",
+})
+# Tamil for "you can hang up now" in its many spellings: வச்சிருங்க,
+# வச்சுருங்க, வச்சிடுங்க, வைக்கிறேன், வெச்சிடறேன் ...
+_CLOSING_PREFIXES = ("வச்ச", "வெச்ச", "வைக்க", "வைச்ச")
+_FILLER_WORDS = frozenset({
+    "you", "so", "much", "a", "lot", "very", "all", "for", "now", "then", "the", "info", "information",
+    "நீங்க", "நீங்கள்", "அது", "எனக்கு", "எனக்குப்", "ரொம்ப", "அவ்வளவுதான்", "அவ்ளோதான்",
+})
+
+
+def _turn_kind(text: str) -> str | None:
+    """"closing" (the visitor is wrapping up), "ack" (a bare acknowledgement),
+    or None for anything that says something."""
+    words = _normalize_short(text).split()
+    if not words or len(words) > 8:
+        return None
+    closing = False
+    for word in words:
+        if word in _CLOSING_WORDS or word.startswith(_CLOSING_PREFIXES):
+            closing = True
+        elif word not in _ACK_WORDS and word not in _FILLER_WORDS:
+            return None
+    if closing:
+        return "closing"
+    return "ack" if any(w in _ACK_WORDS for w in words) else None
+
+
+# These go in the LAST message, in place of the usual voice reminder. Placed
+# mid-prompt they were ignored: a replay of the real call still answered
+# "நீங்க வச்சிருங்க" (you can hang up) with the campus address.
+CLOSING_FINAL = (
+    "The visitor is ending the conversation. Reply with ONLY a short, warm goodbye of under "
+    "ten words: thank them and say they are welcome back any time. No college facts, no "
+    "contact details, no question."
+)
+ACK_FINAL = (
+    " The visitor's last message was only an acknowledgement. If your previous reply asked a "
+    "question, treat it as a yes to that question and answer that. Otherwise reply with one "
+    "short line offering further help, with no new facts."
+)
+
+_SENTENCE_END = re.compile(r"(?<=[.?!])\s+")
+
+
+def _already_said_rule(messages: list[dict]) -> str:
+    """Tells the model, last thing before it answers, what it must not say
+    again. The same real call showed both habits this targets: every reply
+    ended with the same question ("நீங்க சேர்க்கை பத்தி தெரிஞ்சுக்க
+    விரும்புறீங்களா?") even after the visitor said they didn't want that, and
+    whole replies were recited again when the visitor added nothing new."""
+    replies = [
+        m["content"].strip() for m in messages
+        if m.get("role") == "assistant" and isinstance(m.get("content"), str) and m["content"].strip()
+    ]
+    if not replies:
+        return ""
+    questions: list[str] = []
+    for reply in replies:
+        for sentence in _SENTENCE_END.split(reply):
+            sentence = sentence.strip()
+            if sentence.endswith("?") and sentence not in questions:
+                questions.append(sentence)
+    rule = (
+        " Do not repeat yourself. Your previous reply was: \u00ab" + replies[-1][:400] + "\u00bb. "
+        "Say none of that again, even reworded, unless the visitor explicitly asks you to repeat it "
+        "or to say it in another language. If their message adds nothing new, give a short "
+        "acknowledgement instead of more facts."
+    )
+    if questions:
+        rule += (
+            " You have already asked: " + " ".join("\u00ab" + q[:160] + "\u00bb" for q in questions[-4:])
+            + ". Never ask any of these again, in any wording. If the visitor declined or ignored a "
+            "question, drop that subject completely."
+        )
+    rule += (
+        " Most replies should end with the answer, not a question: ask one only when you "
+        "cannot help without the visitor's answer. If the visitor's message is not a question "
+        "or request — they are declining something, commenting, or correcting how you spoke — "
+        "respond to exactly that in one short sentence (apologise briefly if they corrected you) "
+        "and do not add college facts."
+    )
+    return rule
+
+
+_SEARCH_QUERY_PROMPT = (
+    "Translate the user's message into a short English search query. It may be Tamil, "
+    "or Tamil written in English letters, or a mix. Output only the English query."
+)
+_search_query_cache: OrderedDict[str, str] = OrderedDict()
+
+
+async def _english_search_query(query: str) -> str:
+    """English version of a Tamil question, used ONLY to search the knowledge
+    base — the visitor's own words still go to the model unchanged.
+
+    The knowledge base is in English and the embedding model
+    (text-embedding-3-small) barely connects Tamil text to it: measured
+    2026-10-07, a Tamil question scored ~0.1 against the right curated chunk
+    where the same question in English scored ~0.4, and what came back
+    instead was syllabus pages that happen to contain Tamil. Every Tamil
+    answer was being written from unrelated context, which is how a reply
+    came to list courses the college doesn't offer.
+
+    Uses Sarvam 105B rather than Sarvam's translate API: tested the same
+    day, ~160-310 ms against ~700-1,000 ms, and it handles Tamil typed in
+    English letters, which the translate API got wrong. Falls back to the
+    original text on any failure."""
+    key = _normalize_short(query)
+    cached = _search_query_cache.get(key)
+    if cached:
+        _search_query_cache.move_to_end(key)
+        return cached
+    try:
+        response = await asyncio.wait_for(
+            chat_client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=[
+                    {"role": "system", "content": _SEARCH_QUERY_PROMPT},
+                    {"role": "user", "content": query},
+                ],
+                temperature=0,
+                max_tokens=60,
+                extra_body=DISABLE_REASONING,
+            ),
+            timeout=2.0,
+        )
+        english = (response.choices[0].message.content or "").strip()
+    except Exception:
+        logger.warning("Search-query translation failed; searching on the original text")
+        return query
+    if not english:
+        return query
+    _search_query_cache[key] = english
+    if len(_search_query_cache) > 512:
+        _search_query_cache.popitem(last=False)
+    return english
+
+
+async def _build_full_messages(
+    messages: list[dict], voice: bool = False, session_id: str | None = None
+) -> list[dict]:
     """Shared brain: retrieve context for the latest turn and prepend the
     Agni AI persona + that context to the FULL conversation history, so
     follow-ups resolve correctly. Used by every input path."""
     messages = _normalize_roles_for_sarvam(messages)
+    language = _reply_language(messages)
+    # voice-pipeline's persona message has done its job (carrying the call's
+    # language); this backend supplies the one real persona itself.
+    messages = [
+        m for m in messages
+        if not (m.get("role") == "system" and _REPLY_LANGUAGE_MARKER.search(m.get("content") or ""))
+    ]
     # Retrieval should key off what the visitor actually asked, not a
     # synthetic developer/system recovery message that may be the literal
     # last entry (see _normalize_roles_for_sarvam above) — search backward
     # for the most recent real user turn instead of assuming messages[-1].
     user_turns = [m["content"] for m in messages if m.get("role") == "user"]
     query = _retrieval_query(user_turns) if user_turns else messages[-1]["content"]
+    kind = _turn_kind(user_turns[-1]) if user_turns else None
+    if kind == "ack":
+        # "Yes"/"சரி" answers the assistant's last question, so that question
+        # — not some earlier visitor turn — is what the reply is about.
+        last_reply = next(
+            (m.get("content") or "" for m in reversed(messages) if m.get("role") == "assistant"), ""
+        )
+        asked = [x.strip() for x in _SENTENCE_END.split(last_reply) if x.strip().endswith("?")]
+        if asked:
+            query = asked[-1]
     t0 = time.perf_counter()
-    context = await retriever.search(query)
-    logger.info("[timing] retrieval %.0f ms (query %d chars)",
-                (time.perf_counter() - t0) * 1000, len(query))
+    if kind == "closing" or (user_turns and _is_small_talk(query)):
+        # Only reached when there is no earlier substantive turn to reuse
+        # (_retrieval_query falls back to one when there is): searching on
+        # "hello" costs an embedding call and returns noise.
+        context = NO_LOOKUP_CONTEXT
+        logger.info("[timing] retrieval skipped (small talk)")
+    else:
+        if language == "ta" or any(ord(ch) in TAMIL_UNICODE_BLOCK for ch in query):
+            query = await _english_search_query(query)
+            logger.info("[timing] search-query translation %.0f ms",
+                        (time.perf_counter() - t0) * 1000)
+        try:
+            context = await retriever.search(query)
+        except Exception:
+            # A network blip to the embeddings API used to fail the whole
+            # request, which on a voice call is dead silence. Answer without
+            # context instead: the prompt then has the model say it can't
+            # confirm and point to admissions.
+            logger.exception("Knowledge-base lookup failed; answering without context")
+            context = "No matching context found."
+        logger.info("[timing] retrieval %.0f ms (query %d chars)",
+                    (time.perf_counter() - t0) * 1000, len(query))
     return [
         {
             "role": "system",
             "content": SYSTEM_PROMPT_TEMPLATE.format(context=context)
-            + (VOICE_BREVITY_ADDENDUM if voice else ""),
+            + (VOICE_BREVITY_ADDENDUM if voice else "")
+            + (BACKCHANNEL_ADDENDUM if kind == "ack" else "")
+            + (TAMIL_STYLE if language == "ta" else "")
+            + derive_state(messages, session_id).prompt_block(),
         },
         *messages,  # preserves every prior user/assistant turn
+        {
+            "role": "system",
+            "content": (
+                CLOSING_FINAL + " " if kind == "closing"
+                else VOICE_FINAL_REMINDER + " " if voice else ""
+            )
+            + LANGUAGE_RULES[language]
+            + (ACK_FINAL if kind == "ack" else "")
+            + ("" if kind == "closing" else FACTS_RULE + _already_said_rule(messages)),
+        },
     ]
 
 
-async def _generate_reply(messages: list[dict], source: str = "chat"):
+async def _generate_reply(
+    messages: list[dict], source: str = "chat", session_id: str | None = None
+):
     """Non-streaming reply — used by the widget's typed chat, which just
     wants the final text, not incremental tokens.
 
@@ -326,7 +712,9 @@ async def _generate_reply(messages: list[dict], source: str = "chat"):
     (lead saved, tool result appended) and re-submitted for the model's
     actual reply before returning — the caller never sees a tool_calls
     finish_reason, only a normal assistant message."""
-    full_messages = await _build_full_messages(messages, voice=(source == "voice"))
+    full_messages = await _build_full_messages(
+        messages, voice=(source in _SPOKEN_SOURCES), session_id=session_id
+    )
     response = await chat_client.chat.completions.create(
         model=CHAT_MODEL,
         messages=full_messages,
@@ -336,7 +724,7 @@ async def _generate_reply(messages: list[dict], source: str = "chat"):
     choice = response.choices[0]
     if choice.finish_reason == "tool_calls":
         extended_messages = await _resolve_tool_calls(
-            full_messages, choice.message.model_dump(), source
+            full_messages, choice.message.model_dump(), source, session_id
         )
         response = await chat_client.chat.completions.create(
             model=CHAT_MODEL,
@@ -351,7 +739,9 @@ async def _generate_reply(messages: list[dict], source: str = "chat"):
     return response
 
 
-async def _stream_reply_sse(messages: list[dict], source: str = "voice"):
+async def _stream_reply_sse(
+    messages: list[dict], source: str = "voice", session_id: str | None = None
+):
     """Streaming reply, as Server-Sent Events in OpenAI's chat-completion-
     chunk format, required by the Tamil (and now English) Pipecat pipeline's
     OpenAILLMService. Sarvam's streaming chunks are already clean, standard
@@ -366,7 +756,9 @@ async def _stream_reply_sse(messages: list[dict], source: str = "voice"):
     is started for the model's actual spoken reply. Pipecat only ever sees
     plain content deltas, exactly as before Phase 8."""
     t_start = time.perf_counter()
-    full_messages = await _build_full_messages(messages, voice=(source == "voice"))
+    full_messages = await _build_full_messages(
+        messages, voice=(source in _SPOKEN_SOURCES), session_id=session_id
+    )
     current_messages = full_messages
 
     for round_no in range(2):  # at most one tool-resolution round-trip
@@ -441,7 +833,7 @@ async def _stream_reply_sse(messages: list[dict], source: str = "voice"):
             ],
         }
         current_messages = await _resolve_tool_calls(
-            current_messages, assistant_message, source
+            current_messages, assistant_message, source, session_id
         )
         # loop: stream the model's follow-up reply now that the tool result is in context
 
@@ -456,10 +848,13 @@ async def chat_completions(request: Request):
     response."""
     _check_auth(request)
     body = await request.json()
+    # voice-pipeline sends its per-call id so conversation_state can remember
+    # that a lead was already saved on this call.
+    session_id = request.headers.get("x-session-id")
 
     if body.get("stream"):
         return StreamingResponse(
-            _stream_reply_sse(body["messages"], source="voice"),
+            _stream_reply_sse(body["messages"], source="voice", session_id=session_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -468,7 +863,7 @@ async def chat_completions(request: Request):
             },
         )
 
-    response = await _generate_reply(body["messages"], source="voice")
+    response = await _generate_reply(body["messages"], source="voice", session_id=session_id)
     return response.model_dump()
 
 
@@ -485,7 +880,9 @@ async def widget_chat(payload: WidgetChatRequest):
     if not payload.messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
 
-    response = await _generate_reply(payload.messages, source="chat")
+    response = await _generate_reply(
+        payload.messages, source="chat", session_id=payload.session_id
+    )
     reply = response.choices[0].message.content
     if payload.session_id:
         log_turn(payload.session_id, payload.messages, reply)
@@ -494,6 +891,11 @@ async def widget_chat(payload: WidgetChatRequest):
 
 class CallingAgentAskRequest(BaseModel):
     question: str
+    # Optional: the caller's language ("en" or "ta"), if the Indus tool is set
+    # up to send it. Without it the reply language follows the script of the
+    # question, which is wrong when Indus passes a Tamil caller's question in
+    # English.
+    language: str | None = None
 
 
 @app.post("/calling-agent/ask")
@@ -514,8 +916,11 @@ async def calling_agent_ask(payload: CallingAgentAskRequest, request: Request):
     _check_auth(request)
     if not payload.question.strip():
         raise HTTPException(status_code=400, detail="question must not be empty")
+    messages = [{"role": "user", "content": payload.question}]
+    if payload.language in LANGUAGE_RULES:
+        messages.insert(0, {"role": "system", "content": f"reply_language: {payload.language}"})
     response = await _generate_reply(
-        [{"role": "user", "content": payload.question}], source="phone"
+        messages, source="phone"
     )
     return {"reply": response.choices[0].message.content}
 

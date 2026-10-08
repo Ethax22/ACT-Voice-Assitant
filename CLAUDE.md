@@ -28,6 +28,7 @@ These weren't in the original Implementation Plan but are confirmed in-scope for
 - **Admission-intent lead capture**: detect clear admission interest mid-conversation, collect name/phone/email/preferred course, write to **Google Sheets** (decided 2026-09-26, via a service account + `gspread` — simpler than Excel/OneDrive's Graph API/OAuth overhead).
 - **Difficult/sensitive-question handling** via pre-approved talking points (e.g. department-vs-placement comparisons) sourced from admissions/faculty, not improvised by the model.
 - **Full transcript + audio logging** of every conversation — **local disk, 90-day retention, auto-pruned** (decided 2026-09-26).
+- **Sentiment report for the website bot** (added 2026-10-07 at Prakash's request, superseding the Website Voice Bot doc's "sentiment is out of scope for the web bot" line). It is a **post-conversation** report built from the saved transcripts by `rag-backend/sentiment_report.py` (Sarvam 105B, run by hand, output in `rag-backend/reports/`, same 90-day retention) — not real-time scoring during a call, which stays the Calling Agent's requirement. Its labels have not been checked against hand-labelled conversations in either language; don't present them as validated until that's done.
 
 ## Related product — not built in this repo
 

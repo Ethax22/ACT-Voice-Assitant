@@ -34,7 +34,9 @@ first-pass, not verified by a native speaker — same caveat as the VAD
 tuning in pipeline.py: needs a real conversation test, not just code review,
 before treating it as final.
 """
+import asyncio
 import re
+import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -48,6 +50,8 @@ from pipecat.frames.frames import (
     STTUpdateSettingsFrame,
     TranscriptionFrame,
     TTSUpdateSettingsFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings, STTSettings, TTSSettings
@@ -58,6 +62,15 @@ from language_detection import detect_language_and_transcript
 # language flip.
 MAX_BUFFER_SECONDS = 15
 MIN_DETECT_SECONDS = 1.0
+# A mid-call flip changes the persona, the voice and the recogniser, so it
+# needs a surer detection than the 0.5 used to pick a call's starting language.
+SWITCH_MIN_CONFIDENCE = 0.7
+# How long an ordinary turn's transcript is held for a detection that was
+# started when the visitor stopped speaking. Past this the reply goes ahead
+# and a late "different language" result applies from the next turn.
+DETECT_GRACE_SECS = 0.25
+# The first turn, and any turn whose transcript looks off, waits for the result.
+DETECT_MAX_WAIT_SECS = 2.5
 
 Language = Literal["en", "ta"]
 Topic = Literal["about-us", "admissions", "courses", "placements"]
@@ -195,6 +208,48 @@ def detect_language_switch(text: str) -> Language | None:
     return None
 
 
+_TAMIL_SCRIPT = re.compile(r"[஀-௿]")
+# Function words that turn up in almost any real English sentence of a few
+# words. Tamil speech pushed through the English-locked realtime STT comes out
+# as transliterated Latin text ("Ethume koodaathu") with none of them.
+_ENGLISH_FUNCTION_WORDS = frozenset(
+    "a an the is are am was were be do does did can could will would should have has had "
+    "i me my you your we our it its they them this that these those there here "
+    "what which who when where why how to of in on at for from with about and or but not no "
+    "yes if so any some tell want need know please".split()
+)
+# Below this many words a transcript carries too little to judge ("okay",
+# "B.Tech CSE") — never spend a detection call on it. English needs one more:
+# three-word noun-phrase answers ("computer science engineering") are common
+# and contain no function word either.
+_MIN_WORDS_TO_JUDGE = 3
+_MIN_WORDS_TO_JUDGE_EN = 4
+
+
+def _language_suspicion(text: str, session_language: Language) -> str | None:
+    """Cheap, local check for "this turn may not be in the session language".
+
+    Returns None (looks fine — the normal case, no detection call), "certain"
+    (switch without asking Sarvam), or "uncertain" (worth one batch detection
+    call before replying). First-pass heuristic, same caveat as the rest of
+    this module: needs real-call verification.
+    """
+    has_tamil = bool(_TAMIL_SCRIPT.search(text))
+    if session_language == "en":
+        if has_tamil:
+            return "certain"
+        words = re.findall(r"[a-z']+", text.lower())
+        if len(words) >= _MIN_WORDS_TO_JUDGE_EN and not _ENGLISH_FUNCTION_WORDS.intersection(words):
+            return "uncertain"
+        return None
+    # Tamil session: Tamil-script output is the expected case. An all-Latin
+    # transcript is either English speech or Tamil that Sarvam transliterated
+    # (observed 2026-09-29), so it needs the real detector to tell apart.
+    if not has_tamil and len(text.split()) >= _MIN_WORDS_TO_JUDGE:
+        return "uncertain"
+    return None
+
+
 @dataclass
 class ConversationRouterCallbacks:
     """Lets pipeline.py supply language-dependent values (persona prompt)
@@ -241,6 +296,13 @@ class ConversationRouter(FrameProcessor):
         self._cloned_services_by_topic = cloned_services_by_topic or {}
         self._audio_buf = bytearray()
         self._audio_rate = 16000
+        self._bytes_seen = 0
+        # Value of _bytes_seen where this utterance began. A plain offset into
+        # _audio_buf would go stale: the buffer drops audio from the front
+        # once it is full, which it always is after the first few seconds.
+        self._speech_from: int | None = None
+        self._detect_task: asyncio.Task | None = None
+        self._user_turns = 0
 
     @property
     def language(self) -> Language:
@@ -254,8 +316,15 @@ class ConversationRouter(FrameProcessor):
             # utterance's tail so the transcript handler can language-detect
             # it BEFORE the reply is generated.
             self._audio_buf.extend(frame.audio)
+            self._bytes_seen += len(frame.audio)
             self._audio_rate = frame.sample_rate
             del self._audio_buf[: -MAX_BUFFER_SECONDS * self._audio_rate * 2]
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            if self._speech_from is None:
+                # Half a second of lead-in, so the first word is in the clip.
+                self._speech_from = self._bytes_seen - self._audio_rate
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._start_background_detection()
         elif isinstance(frame, TranscriptionFrame) and frame.text and frame.text.strip():
             await self._detect_and_switch(frame)
             await self._handle_transcript(frame.text)
@@ -270,21 +339,100 @@ class ConversationRouter(FrameProcessor):
         and the call only flipped on the NEXT turn. Realtime STT is also
         locked to the call language, so Tamil speech on an `en` call arrived
         as transliterated English; on a switch the batch transcript (spoken
-        language, not forced) replaces it."""
-        audio, rate = bytes(self._audio_buf), self._audio_rate
+        language, not forced) replaces it.
+
+        2026-10-07, morning: stopped running on every turn — the batch call
+        was ~0.6-0.8s sitting directly in front of the reply — and ran only
+        when the transcript looked wrong for the session language
+        (`_language_suspicion`).
+
+        2026-10-07, afternoon: that text check alone missed real switches in
+        both directions in scripted calls. Tamil spoken on an English call
+        came back as a fluent, wrong English sentence ("How to apply for
+        citizenship?"), and English spoken on a Tamil call came back spelled
+        out in Tamil letters — neither looks "off". So detection is back on
+        every utterance of a second or more, but started early and mostly off
+        the reply path: it begins when the local VAD says the visitor stopped
+        (`_start_background_detection`), while Sarvam is still finalizing the
+        transcript, and an ordinary turn waits at most DETECT_GRACE_SECS for
+        it. The first turn of a call and suspicious transcripts wait for the
+        answer, because the widget's start-of-call snippet is often silence
+        and the visitor's first sentence is then the first real evidence."""
+        audio, rate = self._utterance_audio(), self._audio_rate
         self._audio_buf.clear()
-        # Very short turns ("ok", "yes") are too ambiguous to flip a call on.
-        if len(audio) < MIN_DETECT_SECONDS * rate * 2:
+        self._speech_from = None
+        task, self._detect_task = self._detect_task, None
+        self._user_turns += 1
+
+        suspicion = _language_suspicion(frame.text, self._language)
+        if suspicion == "certain":
+            # Tamil script out of an English-locked STT: no API call needed.
+            if task:
+                await self.cancel_task(task)
+            await self._switch_language("ta")
             return
-        try:
-            detected, transcript = await detect_language_and_transcript(audio, rate)
-        except Exception as e:  # never let detection break the turn
-            logger.warning(f"ConversationRouter: language detection failed: {e}")
+        if task is None:
+            # No local VAD in the pipeline (TURN_MODE=sarvam): only pay for a
+            # detection when the transcript looks off.
+            if suspicion is None or len(audio) < MIN_DETECT_SECONDS * rate * 2:
+                return
+            task = self.create_task(self._detect(audio, rate))
+
+        must_wait = suspicion == "uncertain" or self._user_turns == 1
+        t0 = time.monotonic()
+        done, _ = await asyncio.wait(
+            {task}, timeout=DETECT_MAX_WAIT_SECS if must_wait else DETECT_GRACE_SECS
+        )
+        if not done:
+            task.add_done_callback(self._apply_late_detection)
             return
+        detected, transcript = task.result()
+        logger.info(
+            f"[latency] language detection held the transcript {time.monotonic() - t0:.2f}s "
+            f"-> {detected!r} (session {self._language!r})"
+        )
         if detected and detected != self._language:
             await self._switch_language(detected)
             if transcript:
                 frame.text = transcript
+
+    def _utterance_audio(self) -> bytes:
+        if self._speech_from is None:
+            return bytes(self._audio_buf)
+        wanted = self._bytes_seen - self._speech_from
+        return bytes(self._audio_buf[-wanted:]) if wanted > 0 else b""
+
+    def _start_background_detection(self):
+        """Called when the local VAD reports the visitor stopped speaking."""
+        audio, rate = self._utterance_audio(), self._audio_rate
+        # Very short turns ("ok", "yes") are too ambiguous to flip a call on.
+        if len(audio) < MIN_DETECT_SECONDS * rate * 2:
+            return
+        if self._detect_task and not self._detect_task.done():
+            self._detect_task.cancel()  # superseded by a longer clip of the same utterance
+        self._detect_task = self.create_task(self._detect(audio, rate))
+
+    async def _detect(self, audio: bytes, rate: int) -> tuple[str | None, str | None]:
+        try:
+            return await detect_language_and_transcript(
+                audio, rate, min_confidence=SWITCH_MIN_CONFIDENCE
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # never let detection break the turn
+            logger.warning(f"ConversationRouter: language detection failed: {e}")
+            return None, None
+
+    def _apply_late_detection(self, task: asyncio.Task):
+        """A detection that finished after its turn was already answered."""
+        if task.cancelled() or task.exception():
+            return
+        detected, _ = task.result()
+        if detected and detected != self._language:
+            logger.info(
+                f"ConversationRouter: late detection says {detected!r} — switching for the next turn"
+            )
+            self.create_task(self._switch_language(detected))
 
     async def _activate_topic_voice(self, category: Topic):
         """Make the right TTS instance active/configured for `category`,

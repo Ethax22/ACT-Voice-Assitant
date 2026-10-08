@@ -13,6 +13,13 @@ venv/
 # 90-day auto-pruned at runtime — never committed.
 rag-backend/logs/
 voice-pipeline/logs/
+# Sentiment reports built from those logs (sentiment_report.py) — same data.
+rag-backend/reports/
+# scenario_test.py: cached synthetic visitor clips and per-run results
+voice-pipeline/.scenario_clips/
+voice-pipeline/scenario_results/
+# make_voice_samples.py output (audio for choosing a voice by ear)
+voice-pipeline/voice_samples/
 
 # OS / editor junk — unrelated to the project, shouldn't ever be committed
 .DS_Store

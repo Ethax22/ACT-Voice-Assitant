@@ -21,6 +21,7 @@ import time
 from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     Frame,
     MetricsFrame,
     UserStartedSpeakingFrame,
@@ -35,6 +36,8 @@ class LatencyLogger(FrameProcessor):
         super().__init__(**kwargs)
         self._session_id = session_id[:8]
         self._user_stopped_at: float | None = None
+        self._user_started_at: float | None = None
+        self._bot_started_at: float | None = None
         self._turn = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -48,11 +51,34 @@ class LatencyLogger(FrameProcessor):
 
     def _observe(self, frame: Frame):
         if isinstance(frame, UserStartedSpeakingFrame):
+            now = time.monotonic()
+            if self._bot_started_at is not None:
+                # Barge-in: the bot was still talking when the user's turn began.
+                logger.info(
+                    f"[latency] session={self._session_id} turn={self._turn} "
+                    f"user interrupted the bot {now - self._bot_started_at:.2f}s into its reply"
+                )
+                self._bot_started_at = None
             self._user_stopped_at = None
+            self._user_started_at = now
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            if self._bot_started_at is not None:
+                logger.info(
+                    f"[latency] session={self._session_id} turn={self._turn} "
+                    f"bot spoke for {time.monotonic() - self._bot_started_at:.2f}s"
+                )
+                self._bot_started_at = None
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._turn += 1
             self._user_stopped_at = time.monotonic()
+            if self._user_started_at is not None:
+                logger.info(
+                    f"[latency] session={self._session_id} turn={self._turn} "
+                    f"user spoke for {self._user_stopped_at - self._user_started_at:.2f}s"
+                )
+                self._user_started_at = None
         elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_started_at = time.monotonic()
             if self._user_stopped_at is not None:
                 gap = time.monotonic() - self._user_stopped_at
                 logger.info(
