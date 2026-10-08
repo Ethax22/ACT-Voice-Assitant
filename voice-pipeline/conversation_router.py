@@ -1,4 +1,18 @@
-"""Per-topic TTS voice switching + mid-call spoken language switching, both
+"""Mid-call spoken language switching, reply-style selection, and topic
+classification for the UI.
+
+**2026-10-09 changes (P0 fixes from the Zimi audit):**
+- Nothing here waits for language detection any more. The transcript goes
+  to the LLM as soon as it is final; the batch detector runs in the
+  background and a different result switches the call from the NEXT turn.
+- Each turn is classified locally (style_classifier.py, no network) as
+  en / ta / ta_en and the persona + TTS language follow it.
+- One voice for the whole call. Topic classification still runs and still
+  tells the browser which topic tile to light, but it no longer changes the
+  speaker, and a language switch no longer resets the voice.
+The history below describes the per-topic voice design this replaced.
+
+Per-topic TTS voice switching + mid-call spoken language switching, both
 restored/added 2026-09-29.
 
 History: the original English path (Deepgram's Voice Agent, retired 2026-09-
@@ -35,8 +49,8 @@ tuning in pipeline.py: needs a real conversation test, not just code review,
 before treating it as final.
 """
 import asyncio
+import os
 import re
-import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -45,7 +59,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     LLMUpdateSettingsFrame,
-    ManuallySwitchServiceFrame,
     OutputTransportMessageFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
@@ -57,6 +70,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import LLMSettings, STTSettings, TTSSettings
 
 from language_detection import detect_language_and_transcript
+from style_classifier import detect_style
 
 # Rolling cap on buffered mic audio, and the shortest turn we'll trust for a
 # language flip.
@@ -65,14 +79,12 @@ MIN_DETECT_SECONDS = 1.0
 # A mid-call flip changes the persona, the voice and the recogniser, so it
 # needs a surer detection than the 0.5 used to pick a call's starting language.
 SWITCH_MIN_CONFIDENCE = 0.7
-# How long an ordinary turn's transcript is held for a detection that was
-# started when the visitor stopped speaking. Past this the reply goes ahead
-# and a late "different language" result applies from the next turn.
-DETECT_GRACE_SECS = 0.25
-# The first turn, and any turn whose transcript looks off, waits for the result.
-DETECT_MAX_WAIT_SECS = 2.5
 
+# Language = what the call's speech recogniser is set to. Style = how the next
+# reply is worded: "ta_en" is Tamil mixed with English, written in English
+# letters, and is neither of the other two.
 Language = Literal["en", "ta"]
+Style = Literal["en", "ta", "ta_en"]
 Topic = Literal["about-us", "admissions", "courses", "placements"]
 
 # One voice per topic, per language. "about-us" doubles as the default/
@@ -159,6 +171,15 @@ def classify_category(text: str, language: Language) -> Topic | None:
 
 
 LANGUAGE_CODES: dict[Language, str] = {"en": "en-IN", "ta": "ta-IN"}
+
+# TTS language per reply style. Tanglish is Latin-letter text that Tamil-locale
+# TTS has to read; whether en-IN or ta-IN says it better is a question for a
+# listening test, so it is switchable without a code change.
+STYLE_TTS_LANGUAGE: dict[Style, str] = {
+    "en": "en-IN",
+    "ta": "ta-IN",
+    "ta_en": os.environ.get("TA_EN_TTS_LANGUAGE", "ta-IN"),
+}
 
 # Mid-call language-switch detection. Deliberately requires a nearby speak/
 # switch verb, not just the bare word "tamil"/"english" — ACT's own content
@@ -252,48 +273,37 @@ def _language_suspicion(text: str, session_language: Language) -> str | None:
 
 @dataclass
 class ConversationRouterCallbacks:
-    """Lets pipeline.py supply language-dependent values (persona prompt)
+    """Lets pipeline.py supply style-dependent values (persona prompt)
     without this module importing pipeline.py back (would be circular)."""
 
-    persona_prompts: dict[Language, str]
+    persona_prompts: dict[Style, str]
 
 
 class ConversationRouter(FrameProcessor):
     """Sits between STT and the user-turn aggregator. On each finalized user
-    transcript: either handles a spoken language-switch request (updates
-    STT/TTS/LLM settings live, no reconnect), or classifies the topic and
-    switches to that topic's voice for the upcoming answer. Passes every
-    frame through unchanged either way — this only ever adds side-effect
-    frames, never consumes or blocks the transcript itself, so the
-    user-aggregator downstream still sees every TranscriptionFrame exactly
-    as before.
+    transcript it (1) classifies the reply style locally and, if it changed,
+    updates the LLM persona and TTS language live, (2) handles a spoken
+    language-switch request, and (3) classifies the topic so the browser can
+    light the right tile. It never waits for anything and never blocks the
+    transcript: every frame is passed through, so the user-aggregator
+    downstream sees every TranscriptionFrame exactly as before.
 
-    `cloned_services_by_topic`, added 2026-09-29: maps a topic to its own
-    dedicated `ClonedVoiceTTSService` instance, for topics that have a
-    cloned voice configured (pipeline.py builds these; empty dict if none
-    are). A topic present here gets a `ManuallySwitchServiceFrame` to make
-    that instance active in the `ServiceSwitcher` pipeline.py wraps around
-    it and the stock `SarvamTTSService`; a topic absent from it instead gets
-    a plain voice-only `TTSUpdateSettingsFrame` targeted at `stock_tts`,
-    exactly as before this feature existed. When `cloned_services_by_topic`
-    is empty (the common case today — no staff recordings exist yet), this
-    class's behavior is unchanged from before per-topic cloning existed:
-    every topic just gets an untargeted voice update on the single `tts` in
-    the pipeline."""
+    The speaker's voice is fixed for the whole call (pipeline.py builds one TTS
+    service); this class never changes it."""
 
     def __init__(
         self,
         initial_language: Language,
         callbacks: ConversationRouterCallbacks,
-        stock_tts,
-        cloned_services_by_topic: dict[Topic, "FrameProcessor"] | None = None,
+        trace=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._language: Language = initial_language
+        self._style: Style = initial_language
+        self._tts_language = STYLE_TTS_LANGUAGE[self._style]
         self._callbacks = callbacks
-        self._stock_tts = stock_tts
-        self._cloned_services_by_topic = cloned_services_by_topic or {}
+        self._trace = trace
         self._audio_buf = bytearray()
         self._audio_rate = 16000
         self._bytes_seen = 0
@@ -327,37 +337,33 @@ class ConversationRouter(FrameProcessor):
             self._start_background_detection()
         elif isinstance(frame, TranscriptionFrame) and frame.text and frame.text.strip():
             await self._detect_and_switch(frame)
+            await self._apply_style(frame.text)
             await self._handle_transcript(frame.text)
 
         await self.push_frame(frame, direction)
 
     async def _detect_and_switch(self, frame: TranscriptionFrame):
-        """2026-10-05: run language detection on this turn's audio BEFORE the
-        transcript is released to the LLM. Previously detection ran after the
-        turn (AudioBufferProcessor.on_user_turn_audio), so the reply to the
-        first Tamil utterance was still generated under the English persona
-        and the call only flipped on the NEXT turn. Realtime STT is also
-        locked to the call language, so Tamil speech on an `en` call arrived
-        as transliterated English; on a switch the batch transcript (spoken
-        language, not forced) replaces it.
+        """Language detection for this turn, WITHOUT holding the transcript.
 
-        2026-10-07, morning: stopped running on every turn — the batch call
-        was ~0.6-0.8s sitting directly in front of the reply — and ran only
-        when the transcript looked wrong for the session language
-        (`_language_suspicion`).
+        History: 2026-10-05 this ran before the transcript reached the LLM so
+        the reply to a first Tamil sentence was already in Tamil; 2026-10-07 it
+        waited up to 0.25 s for an ordinary turn and up to 2.5 s for the first
+        turn or an odd-looking one. 2026-10-09: no waiting at all. The first
+        sentence of a call is exactly where that 2.5 s was being paid, and the
+        visitor feels every second of it.
 
-        2026-10-07, afternoon: that text check alone missed real switches in
-        both directions in scripted calls. Tamil spoken on an English call
-        came back as a fluent, wrong English sentence ("How to apply for
-        citizenship?"), and English spoken on a Tamil call came back spelled
-        out in Tamil letters — neither looks "off". So detection is back on
-        every utterance of a second or more, but started early and mostly off
-        the reply path: it begins when the local VAD says the visitor stopped
-        (`_start_background_detection`), while Sarvam is still finalizing the
-        transcript, and an ordinary turn waits at most DETECT_GRACE_SECS for
-        it. The first turn of a call and suspicious transcripts wait for the
-        answer, because the widget's start-of-call snippet is often silence
-        and the visitor's first sentence is then the first real evidence."""
+        What is still instant: a Tamil-script transcript on an English call is
+        switched on the spot (a local check, no API call). What is not: the
+        batch detector started when the local VAD said the visitor stopped
+        (`_start_background_detection`) runs on its own and, if it disagrees
+        with the call's language, switches it from the next turn
+        (`_apply_late_detection`).
+
+        Known cost: realtime STT is locked to the call language, so Tamil spoken
+        on an English-start call can arrive as a fluent but wrong English
+        sentence, which no text check can spot. That first reply is then
+        generated from the wrong text, and the call corrects itself only on the
+        following turn."""
         audio, rate = self._utterance_audio(), self._audio_rate
         self._audio_buf.clear()
         self._speech_from = None
@@ -377,24 +383,7 @@ class ConversationRouter(FrameProcessor):
             if suspicion is None or len(audio) < MIN_DETECT_SECONDS * rate * 2:
                 return
             task = self.create_task(self._detect(audio, rate))
-
-        must_wait = suspicion == "uncertain" or self._user_turns == 1
-        t0 = time.monotonic()
-        done, _ = await asyncio.wait(
-            {task}, timeout=DETECT_MAX_WAIT_SECS if must_wait else DETECT_GRACE_SECS
-        )
-        if not done:
-            task.add_done_callback(self._apply_late_detection)
-            return
-        detected, transcript = task.result()
-        logger.info(
-            f"[latency] language detection held the transcript {time.monotonic() - t0:.2f}s "
-            f"-> {detected!r} (session {self._language!r})"
-        )
-        if detected and detected != self._language:
-            await self._switch_language(detected)
-            if transcript:
-                frame.text = transcript
+        task.add_done_callback(self._apply_late_detection)
 
     def _utterance_audio(self) -> bytes:
         if self._speech_from is None:
@@ -434,42 +423,6 @@ class ConversationRouter(FrameProcessor):
             )
             self.create_task(self._switch_language(detected))
 
-    async def _activate_topic_voice(self, category: Topic):
-        """Make the right TTS instance active/configured for `category`,
-        under the CURRENT language. Handles both the no-clones case (a
-        single stock `tts`, untargeted settings update — unchanged behavior)
-        and the switcher case (multiple instances, explicit activation)."""
-        cloned_service = self._cloned_services_by_topic.get(category)
-        if cloned_service is not None:
-            # Its voice_id and (per the live language update below) language
-            # are already correct — just make it the active member.
-            await self.push_frame(
-                ManuallySwitchServiceFrame(service=cloned_service),
-                FrameDirection.DOWNSTREAM,
-            )
-            logger.debug(f"ConversationRouter: topic={category!r} -> cloned voice ({self._language})")
-            await self._notify_client_topic(category)
-            return
-
-        voice = TOPIC_VOICES[self._language][category]
-        if self._cloned_services_by_topic:
-            # A switcher exists (at least one OTHER topic is cloned) — this
-            # topic isn't, so make sure the stock service is the active
-            # member before/alongside updating its voice.
-            await self.push_frame(
-                ManuallySwitchServiceFrame(service=self._stock_tts),
-                FrameDirection.DOWNSTREAM,
-            )
-        await self.push_frame(
-            TTSUpdateSettingsFrame(
-                service=self._stock_tts if self._cloned_services_by_topic else None,
-                delta=TTSSettings(voice=voice),
-            ),
-            FrameDirection.DOWNSTREAM,
-        )
-        logger.debug(f"ConversationRouter: topic={category!r} -> stock voice={voice!r} ({self._language})")
-        await self._notify_client_topic(category)
-
     async def _notify_client_topic(self, category: Topic):
         """Tells the browser which topic the upcoming reply is about, so
         widget/index.html's setActiveTopic/setSpeakingTopic can drive the
@@ -485,20 +438,52 @@ class ConversationRouter(FrameProcessor):
             FrameDirection.DOWNSTREAM,
         )
 
+    async def _apply_style(self, text: str):
+        """Pick this turn's reply style from the transcript, locally and
+        instantly, and push the persona / TTS language if it changed."""
+        previous = self._style
+        evidence = detect_style(text)
+        style: Style = (evidence or previous).lower()  # no evidence: keep the call's style
+        if self._trace is not None:
+            self._trace.begin_turn(
+                transcript=text,
+                detected_style=evidence or "none (kept previous)",
+                reply_style=style.upper(),
+                stt_language=LANGUAGE_CODES[self._language],
+            )
+        if style != previous:
+            logger.info(f"ConversationRouter: reply style {previous!r} -> {style!r} ({text[:60]!r})")
+            await self._set_style(style)
+
+    async def _set_style(self, style: Style):
+        self._style = style
+        await self.push_frame(
+            LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=self._callbacks.persona_prompts[style])
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        tts_language = STYLE_TTS_LANGUAGE[style]
+        if tts_language != self._tts_language:
+            self._tts_language = tts_language
+            # Language only: the voice is fixed for the call and is never in
+            # this delta.
+            await self.push_frame(
+                TTSUpdateSettingsFrame(delta=TTSSettings(language=tts_language)),
+                FrameDirection.DOWNSTREAM,
+            )
+
     async def _handle_transcript(self, text: str):
         switch_target = detect_language_switch(text)
         if switch_target and switch_target != self._language:
             await self._switch_language(switch_target)
-            return  # meta-command, not a real question — skip topic voice pick
+            return  # meta-command, not a real question - skip topic pick
 
+        # The topic only tells the browser which tile to light; it does not
+        # touch the voice. A stray "I" / "okay" has no topic: leave the tile.
         category = classify_category(text, self._language)
-        if category is None:
-            # No topic in this utterance (a stray "I", "okay", "thank you"):
-            # keep the voice the call is already on. Falling back to
-            # "about-us" here flipped the voice mid-call on junk fragments
-            # (seen in a real call, 2026-10-08: Anas -> Keerthi -> Anas).
-            return
-        await self._activate_topic_voice(category)
+        if category is not None:
+            await self._notify_client_topic(category)
 
     async def maybe_auto_switch_language(self, detected: Language | None):
         """2026-09-29: called from pipeline.py, NOT from process_frame — the
@@ -528,32 +513,11 @@ class ConversationRouter(FrameProcessor):
             STTUpdateSettingsFrame(delta=STTSettings(language=LANGUAGE_CODES[target])),
             FrameDirection.UPSTREAM,
         )
-        # Untargeted + reach_inactive_services=True so EVERY TTS member
-        # (stock and every cloned instance, active or not) picks up the new
-        # language — a cloned voice is cross-lingual (module docstring in
-        # cloned_voice_tts.py) so it stays valid across the switch, it just
-        # needs telling which language to speak next. `voice=` here only
-        # matters to the stock service (cloned instances ignore `voice`,
-        # their identity is fixed per instance) — harmless no-op for them.
-        await self.push_frame(
-            TTSUpdateSettingsFrame(
-                delta=TTSSettings(
-                    language=LANGUAGE_CODES[target],
-                    voice=TOPIC_VOICES[target]["about-us"],
-                ),
-                reach_inactive_services=bool(self._cloned_services_by_topic),
-            ),
-            FrameDirection.DOWNSTREAM,
-        )
-        # Reset to the default/about-us voice for the new language — mirrors
-        # a fresh call's starting state, and matters when a switcher exists:
-        # whichever topic was active before the switch stays active
-        # otherwise, even though its voice (if stock) or identity (if
-        # cloned) may no longer make sense as a "default."
-        await self._activate_topic_voice("about-us")
-        await self.push_frame(
-            LLMUpdateSettingsFrame(
-                delta=LLMSettings(system_instruction=self._callbacks.persona_prompts[target])
-            ),
-            FrameDirection.DOWNSTREAM,
-        )
+        # The reply style follows the language the call was just found to be
+        # in: Tamil from an English style, English from either Tamil style.
+        # A Tanglish call that is detected as Tamil stays Tanglish.
+        if target == "ta" and self._style == "en":
+            await self._set_style("ta")
+        elif target == "en" and self._style != "en":
+            await self._set_style("en")
+        # The speaker's voice is NOT touched here: one voice per call.

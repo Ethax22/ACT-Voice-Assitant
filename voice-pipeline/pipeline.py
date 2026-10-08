@@ -25,21 +25,32 @@ from loguru import logger
 
 Language = Literal["en", "ta"]
 
-PERSONA_PROMPTS: dict[Language, str] = {
+# Keyed by reply STYLE, not just language: "ta_en" is Tamil mixed with English
+# (Tanglish), which gets its own persona line. The text after "reply_language:"
+# is read by rag-backend (main.py's _reply_language), which enforces it and
+# writes the real style instructions itself.
+PERSONA_PROMPTS: dict[str, str] = {
     "en": (
         "You are Agni AI, the voice assistant for Agni College of Technology. "
         "Talk like a helpful senior student showing someone around campus: warm, "
         "direct, and brief. Keep answers short since this is a spoken "
         "conversation, not a lookup. Respond in English.\n"
-        # Read by rag-backend (main.py's _reply_language), which enforces it.
         "reply_language: en"
     ),
     "ta": (
         "You are Agni AI, the voice assistant for Agni College of Technology. "
         "Talk like a helpful senior student showing someone around campus: warm, "
         "direct, and brief. Keep answers short since this is a spoken "
-        "conversation, not a lookup. Respond in Tamil.\n"
+        "conversation, not a lookup. Respond in everyday spoken Chennai Tamil.\n"
         "reply_language: ta"
+    ),
+    "ta_en": (
+        "You are Agni AI, the voice assistant for Agni College of Technology. "
+        "Talk like a helpful senior student showing someone around campus: warm, "
+        "direct, and brief. Keep answers short since this is a spoken "
+        "conversation, not a lookup. Respond in natural spoken Tamil mixed with "
+        "English (Tanglish), the way the visitor does.\n"
+        "reply_language: ta_en"
     ),
 }
 
@@ -164,12 +175,11 @@ LANGUAGE_CODES: dict[Language, str] = {
 # language — four recordings covers "about-us"/"admissions"/"courses"/
 # "placements" for both English and Tamil, not eight.
 #
-# A topic with no env var set here keeps using its stock TOPIC_VOICES entry
-# (unaffected — this is the current, default state, since no staff
-# recordings exist yet per CLAUDE.md/Implementation Plan). Any subset can be
-# configured — e.g. only "admissions" cloned, the other three still stock —
-# conversation_router.py's ServiceSwitcher-based routing handles a mix of
-# stock and cloned topics, not just all-or-nothing.
+# 2026-10-09: only the "about-us" entry is used now - it is the one voice for
+# the whole call, whatever the topic or language (build_pipeline). The other
+# three entries are read but ignored; they are left in place so the env file
+# and greeting_cache.py keep working unchanged. With no about-us ID set, the
+# call uses the stock About Us voice (TOPIC_VOICES[language]["about-us"]).
 # dict[Topic, str | None] conceptually — Topic itself isn't imported at
 # module level (it lives in conversation_router.py, only imported lazily
 # inside build_pipeline(), like every other pipecat-adjacent import here).
@@ -220,7 +230,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
     from conversation_logger import TranscriptLogger, save_session_audio
     from greeting_cache import GreetingPlayer, PlayGreetingFrame
     from conversation_router import ConversationRouter, ConversationRouterCallbacks, TOPIC_VOICES
-    from latency_metrics import LatencyLogger
+    from latency_metrics import LatencyLogger, TurnTrace
     from raw_pcm_serializer import RawPCMSerializer
     from speech_text_filter import to_speech
     from turn_taking import build_user_aggregator_params, stt_silence_duration_ms
@@ -290,9 +300,17 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # `language=`/`voice=` via **kwargs instead of erroring, which is what
     # caused Sarvam to speak English with the default voice instead of
     # Tamil/kavya in earlier testing.
+    # How long Pipecat waits for a TTS reply's audio before it closes that reply's
+    # audio context. Its default is 3.0 s; a cloned voice's first audio took 3.18 s
+    # in a real call (2026-10-08), so the context was closed first, the audio that
+    # then arrived was thrown away ("no context ID provided" x hundreds) and the
+    # visitor heard nothing. Plenty of headroom instead of a tight guess.
+    tts_wait_secs = float(os.environ.get("TTS_STOP_FRAME_TIMEOUT_SECS", "10"))
+
     stock_tts = SarvamTTSService(
         api_key=sarvam_api_key,
         text_transforms=[("*", to_speech)],
+        stop_frame_timeout_s=tts_wait_secs,
         settings=SarvamTTSService.Settings(
             model=TTS_MODEL,
             voice=TOPIC_VOICES[language]["about-us"],
@@ -312,7 +330,15 @@ def build_pipeline(websocket, language: Language, session_id: str):
             # to confirm, same as the VAD tuning.
             # Env-overridable so buffer settings can be A/B tested against
             # the [latency] log lines without a code edit.
-            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "120")),
+            # 2026-10-09: default lowered from 120 to 40. Sarvam holds text until
+            # this many characters have arrived, and pipecat flushes only at the
+            # END of the reply, so with 120 a short first sentence (8-15 words,
+            # about 45-90 characters) waited for more text and the first words
+            # were not spoken until the LLM had written most of the reply. 40 lets
+            # the first short sentence go straight out. Trade-off: less text
+            # per synthesis call can mean less smooth prosody - decide by ear;
+            # TTS_MIN_BUFFER_SIZE overrides it without a code change.
+            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "40")),
             max_chunk_length=int(os.environ.get("TTS_MAX_CHUNK_LENGTH", "300")),
             # Voice tuning (step J): unset = Sarvam's own defaults. pace is a
             # speed multiplier (0.5-2.0), temperature the variation in
@@ -322,80 +348,59 @@ def build_pipeline(websocket, language: Language, session_id: str):
         ),
     )
 
-    # Phase 7 — voice cloning, one ClonedVoiceTTSService per topic that has
-    # a voice_id configured (see CLONED_VOICE_IDS above — cross-lingual, so
-    # this doesn't depend on `language`). Each is a non-streaming POST
-    # /voices/clone call per utterance, not interchangeable with the
-    # streaming stock service via a settings tweak (cloned_voice_tts.py's
-    # docstring), which is why these are separate instances switched via a
-    # Pipecat ServiceSwitcher below rather than one instance reconfigured in
-    # place. The shared aiohttp session is closed on client disconnect.
+    # Phase 7 — voice cloning. ONE voice for the whole call (2026-10-09): the
+    # About Us voice, `CLONED_VOICE_ID_ABOUT_US`, or its stock equivalent when no
+    # clone is configured. Earlier versions kept one TTS service per topic and
+    # switched between them with a ServiceSwitcher, which changed the speaker
+    # mid-call and opened up to four cloned-voice connections. The other three
+    # CLONED_VOICE_ID_* variables are no longer read. A cloned voice is
+    # cross-lingual (cloned_voice_tts.py), so the same voice speaks every style.
+    #
+    # CLONED_VOICE_TRANSPORT=persistent (default): one long-lived websocket for
+    # the whole call, text sent sentence by sentence. =per_utterance: the earlier
+    # version that opens a websocket per sentence (kept as a fallback).
     cloned_voice_http_session = None
-    cloned_services_by_topic: dict[str, object] = {}
-    configured_clones = {topic: vid for topic, vid in CLONED_VOICE_IDS.items() if vid}
-    if configured_clones:
-        import aiohttp
-
+    tts = stock_tts
+    session_voice_id = TOPIC_VOICES[language]["about-us"]
+    cloned_voice_id = CLONED_VOICE_IDS.get("about-us")
+    if cloned_voice_id:
         from cloned_voice_tts import ClonedVoiceTTSService, PersistentClonedVoiceTTSService
 
-        # CLONED_VOICE_TRANSPORT=persistent (default): one long-lived websocket
-        # per cloned voice for the whole call. =per_utterance: the earlier
-        # version that opens a websocket per sentence (kept as a fallback).
         transport_mode = os.environ.get("CLONED_VOICE_TRANSPORT", "persistent").lower()
         voice_tuning = dict(
             # Same clean-up and delivery tuning as the stock voice above.
-            # Without text_transforms the cloned voices read raw text: the
+            # Without text_transforms the cloned voice reads raw text: the
             # pronunciation fixes in speech_text_filter ("EEE" -> "triple E",
-            # "CSE" -> "C S E", years, markdown) only applied to the stock
-            # voice, so they vanished when cloned voices went live.
+            # "CSE" -> "C S E", years, markdown) only apply to the stock voice
+            # otherwise.
             text_transforms=[("*", to_speech)],
-            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "120")),
+            stop_frame_timeout_s=tts_wait_secs,
+            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "40")),
             max_chunk_length=int(os.environ.get("TTS_MAX_CHUNK_LENGTH", "300")),
             **_optional_float_settings(pace="TTS_PACE", temperature="TTS_TEMPERATURE"),
         )
         if transport_mode == "per_utterance":
+            import aiohttp
+
             cloned_voice_http_session = aiohttp.ClientSession()
-        for topic, voice_id in configured_clones.items():
-            if transport_mode == "per_utterance":
-                cloned_services_by_topic[topic] = ClonedVoiceTTSService(
-                    api_key=sarvam_api_key,
-                    aiohttp_session=cloned_voice_http_session,
-                    voice_id=voice_id,
-                    language_code=language_code,
-                    sample_rate=24000,
-                    **voice_tuning,
-                )
-            else:
-                cloned_services_by_topic[topic] = PersistentClonedVoiceTTSService(
-                    api_key=sarvam_api_key,
-                    voice_id=voice_id,
-                    language_code=language_code,
-                    sample_rate=24000,
-                    **voice_tuning,
-                )
-        logger.info(f"Using cloned voices for topics: {sorted(configured_clones)}")
-
-    if cloned_services_by_topic:
-        from pipecat.pipeline.service_switcher import (
-            ServiceSwitcher,
-            ServiceSwitcherStrategyManual,
-        )
-
-        # "about-us" (cloned if configured, else stock) goes first so it's
-        # the switcher's initial active member, matching the persona a call
-        # starts on before any topic has been classified.
-        default_service = cloned_services_by_topic.get("about-us", stock_tts)
-        other_services = [
-            svc
-            for svc in [stock_tts, *cloned_services_by_topic.values()]
-            if svc is not default_service
-        ]
-        tts = ServiceSwitcher(
-            services=[default_service, *other_services],
-            strategy_type=ServiceSwitcherStrategyManual,
-        )
-    else:
-        tts = stock_tts
+            tts = ClonedVoiceTTSService(
+                api_key=sarvam_api_key,
+                aiohttp_session=cloned_voice_http_session,
+                voice_id=cloned_voice_id,
+                language_code=language_code,
+                sample_rate=24000,
+                **voice_tuning,
+            )
+        else:
+            tts = PersistentClonedVoiceTTSService(
+                api_key=sarvam_api_key,
+                voice_id=cloned_voice_id,
+                language_code=language_code,
+                sample_rate=24000,
+                **voice_tuning,
+            )
+        session_voice_id = cloned_voice_id
+        logger.info(f"Using the cloned About Us voice for the whole call ({transport_mode})")
 
     # Persona lives in llm's system_instruction (current, non-deprecated
     # pattern) rather than as an initial "system" message here — either way
@@ -413,11 +418,11 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # classify topic / detect a switch request) while still passing it
     # through unchanged for the aggregator to fold into `context` exactly as
     # before this was added.
+    turn_trace = TurnTrace(voice_id=session_voice_id)
     router = ConversationRouter(
         initial_language=language,
         callbacks=ConversationRouterCallbacks(persona_prompts=PERSONA_PROMPTS),
-        stock_tts=stock_tts,
-        cloned_services_by_topic=cloned_services_by_topic,
+        trace=turn_trace,
     )
 
     # Phase 10 — audio logging. Placed after transport.output() (not
@@ -468,7 +473,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
             audio_logger,
             assistant_aggregator,
             transcript_logger,
-            LatencyLogger(session_id),
+            LatencyLogger(session_id, trace=turn_trace, context=context),
         ]
     )
 
@@ -515,7 +520,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # On hangup, tear the whole pipeline down. Without this the Sarvam STT
     # websocket stays open until its 60s inactivity timeout fires an error.
     # Also closes the aiohttp session ClonedVoiceTTSService opened above, if
-    # this call used one (stock-voice sessions never create one).
+    # this call used one (the default persistent transport never creates one).
     @transport.event_handler("on_client_disconnected")
     async def _on_client_disconnected(transport, client):
         if cloned_voice_http_session is not None:

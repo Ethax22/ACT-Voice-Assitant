@@ -37,6 +37,7 @@ from pydantic import BaseModel
 import httpx
 from openai import AsyncOpenAI
 
+from language_style import detect_style
 from retriever import retriever
 from leads import normalize_indian_mobile, save_lead
 from conversation_logger import log_turn, prune_old_logs
@@ -199,6 +200,35 @@ def _detect_language(messages: list[dict]) -> str:
     return "ta" if any(ord(ch) in TAMIL_UNICODE_BLOCK for ch in text) else "en"
 
 
+# A run of 8+ digits, allowing spaces or hyphens between them ("98765 43210",
+# "9 8 7 6 5 4 3 2 1 0"). Speech recognition often drops or doubles a digit, so
+# this deliberately also matches runs that are NOT a valid mobile number.
+_PHONE_RUN = re.compile(r"(?<![\d])(?:\d[\s\-]?){8,}\d(?![\d])")
+FORCE_CAPTURE_LEAD = {"type": "function", "function": {"name": "capture_lead"}}
+
+
+def _should_force_lead_capture(messages: list[dict], session_id: str | None) -> bool:
+    """True when the visitor's latest message contains a phone number and this
+    conversation has no lead saved for it yet.
+
+    Why code decides instead of the model: Sarvam 105B only sometimes calls
+    capture_lead. Measured 2026-10-09 with a name and a valid number in the
+    message: it called the tool in 1 of 4 tries in English and 0 of 4 in Tamil,
+    and in the other tries said "I've noted your details" with nothing saved
+    (a real widget call told a visitor their number was noted; no row reached
+    the Sheet). A phone number in the visitor's own words is clear intent, so
+    the tool call is required for that turn; the model still extracts the name
+    and course from the conversation."""
+    latest = next(
+        (m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), ""
+    )
+    match = _PHONE_RUN.search(latest)
+    if not match:
+        return False
+    phone = normalize_indian_mobile(match.group(0))
+    return not (phone and lead_already_captured(session_id, phone))
+
+
 async def _resolve_tool_calls(
     messages: list[dict], assistant_message: dict, source: str, session_id: str | None = None
 ) -> list[dict]:
@@ -208,6 +238,7 @@ async def _resolve_tool_calls(
     model can produce its actual spoken/typed confirmation."""
     language = _detect_language(messages)
     extended = [*messages, assistant_message]
+    invalid_phone = None
     for call in assistant_message.get("tool_calls") or []:
         function = call.get("function") or {}
         result = "Unrecognized tool."
@@ -225,6 +256,7 @@ async def _resolve_tool_calls(
                     "digits back to the visitor and ask them to repeat the full "
                     "number, then call capture_lead again."
                 )
+                invalid_phone = args.get("phone", "")
             elif lead_already_captured(session_id, phone):
                 result = (
                     "This lead is already recorded for this conversation — nothing "
@@ -249,6 +281,20 @@ async def _resolve_tool_calls(
         extended.append(
             {"role": "tool", "tool_call_id": call.get("id"), "content": result}
         )
+    if invalid_phone is not None:
+        # The tool result alone was not enough: in Tamil the model still said
+        # it had "noted" a 9-digit number. A system message last is what it
+        # follows (same reason the language rules are repeated last).
+        extended.append({
+            "role": "system",
+            "content": (
+                f"The phone number the visitor gave ({invalid_phone!r}) is NOT a valid 10-digit "
+                "mobile number and nothing was saved. Do not say it was noted, saved or "
+                "received. In one short friendly sentence, say you may have misheard and ask "
+                "them to say all ten digits again, slowly. Keep the language and style "
+                "you were already using."
+            ),
+        })
     return extended
 
 
@@ -305,15 +351,18 @@ VOICE_BREVITY_ADDENDUM = """
 
 SPOKEN-CALL STYLE (overrides the 2-4 sentence guideline above): this reply
 will be heard aloud, on a live call.
-- Most replies should be 5 to 25 words: one or two short sentences. 45 words
-  is the hard ceiling, for when the visitor asked for detail — not the target.
-- Answer a simple question directly, with the single most useful fact first.
+- Most replies should be 35 to 55 words: two or three short sentences. 70 words
+  is the hard ceiling, for when the visitor asked for detail. A bare
+  acknowledgement ("okay", "hmm") still gets one short sentence.
+- Open with the direct answer in a short sentence, then add the one or two
+  facts from the context that best help them decide or act (a number, a name,
+  a next step). A one-line answer that leaves out the useful detail is too thin.
 - Ask at most one question per reply, and only if you haven't already asked
   for something.
 - Use contractions and everyday words ("we've got", "you'll need"), never
   brochure language ("we provide a comprehensive range of").
 - If the context holds a list (courses, facilities, recruiters, numbers),
-  name at most 3 items and offer to go on.
+  name up to 4 items and offer to go on.
 - Don't greet again, don't restate the question, don't recite the context,
   and don't repeat anything you've already told them."""
 
@@ -324,89 +373,106 @@ will be heard aloud, on a live call.
 # model answers is what brings it down.
 VOICE_FINAL_REMINDER = (
     "You are speaking on a live voice call. Answer the visitor's last message "
-    "in at most two short sentences, about 25 words in total. Start with the "
-    "answer, not with a filler or praise. Give the one most useful fact. "
-    "Do not list more than three items. Stop there; they will ask if they want more."
+    "in two or three short sentences, about 40 to 50 words in total. Start with "
+    "the answer, not with a filler or praise, and make that first sentence short "
+    "(8 to 15 words) so it can be spoken at once. Then give the one or two facts "
+    "from the context that help most, such as a number, a name or the next step; "
+    "do not stop at a bare one-line answer. Do not list more than four items."
 )
 
-# The reply language is decided in code and stated last, where the model
-# weighs it most. Left to the model it drifted: replies mixed English and
-# Tamil, or answered in the language of the retrieved context instead of the
-# visitor's (reported by Prakash 2026-10-07; also flagged by the sentiment
-# report on a real test call).
+# The reply style is decided in code and stated last, where the model weighs
+# it most. Left to the model it drifted: replies mixed English and Tamil, or
+# answered in the language of the retrieved context instead of the visitor's
+# (reported by Prakash 2026-10-07; also flagged by the sentiment report on a
+# real test call).
+#
+# Three styles (2026-10-09): "en", "ta" (visitor wrote Tamil script) and
+# "ta_en" (Tamil and English mixed, usually typed or transcribed in English
+# letters: "fees evlo bro?"). The old "ta" rule forced every word into Tamil
+# script and banned English words, which is not how anyone speaks and is what
+# made replies sound like a newsreader.
 LANGUAGE_RULES = {
     "en": (
         "Reply in English only. Do not use Tamil words or Tamil script anywhere in "
         "the reply, even if the visitor mixed in a Tamil word or the context contains Tamil."
     ),
     "ta": (
-        "Reply in Tamil only, written in Tamil script, from the first word to the last. "
-        "Do not write English sentences and do not switch to English partway through. "
-        "The context is mostly in English: translate what you take from it into Tamil "
-        "instead of copying English phrases (say \"விசாலமான அறைகள்\", not \"spacious rooms\"). "
-        "Keep in English letters only the college's name, course and degree names "
-        "(B.Tech, CSE) and acronyms like Wi-Fi, NAAC, TNEA, LPA. Every other English "
-        "word must be written in Tamil letters, never in Latin letters (\"சீசன்\", "
-        "\"கேம்பஸ்ல\", \"டைனிங் ஹால்\", \"ஹைஸ்ட் பேக்கேஜ்\", not \"season\", \"campus-ல\", "
-        "\"dining hall\"). "
-        # The style block higher up was not enough by itself: typed-chat replies
-        # still said "பசங்க"/"பொண்ணுங்க" until this was restated here.
-        "Use polite spoken Tamil with நீங்க/உங்க. For boys and girls always say "
-        "மாணவர்கள் and மாணவிகள் (for example: \"மாணவர்களுக்கும் மாணவிகளுக்கும் தனித்தனி "
-        "ஹாஸ்டல் இருக்கு\"); the words பசங்க, பையன், பையன்கள், பொண்ணு, பொண்ணுங்க, ஆம்பளை "
-        "and பொம்பளை must not appear in your reply. Talk like everyday "
-        "Chennai Tamil, not textbook Tamil: use the English words people really say, "
-        "written in Tamil letters — காலேஜ், கோர்ஸ், ஃபீஸ், ஹாஸ்டல், அட்மிஷன், "
-        "அப்ளிகேஷன், ப்ளேஸ்மென்ட், கேம்பஸ், டீட்டெயில்ஸ், நம்பர், டைம், கிளாஸ், "
-        "ஃப்ரீ, வாட்ஸ்அப், கான்டாக்ட் — and give English verbs Tamil endings "
-        "(\"அப்ளை பண்ணுங்க\", \"கான்டாக்ட் பண்ணலாம்\", \"அனுப்பிடுறேன்\"). Avoid "
-        "formal words like கட்டணம், விடுதி, சேர்க்கை, வேலைவாய்ப்பு, விண்ணப்பம், "
-        "தொலைபேசி எண், தொடர்பு கொள்ள. Use spoken endings (படிக்கிறாங்க, இருக்கு, "
-        "வேணும், நிச்சயமா, புரிஞ்சுது), never written ones (உள்ளது, ஆகும்). The campus is at Thalambur, "
-        # A test reply turned "Thalambur" into "தாம்பரம்" (Tambaram, a different place).
-        "written தாழம்பூர் in Tamil — never தாம்பரம், which is a different place."
+        "Reply in spoken Chennai Tamil, written mostly in Tamil script, the way a "
+        "friendly person talks - not textbook, not newsreader, not formal written Tamil. "
+        "Everyday English words stay in English (fees, course, application, admission, "
+        "documents, payment, hostel, placement, website, registration, deadline, branch, "
+        "details, process) - do not translate them into formal Tamil. "
+        "Use English names, degree names and acronyms as they are (B.Tech, CSE, NAAC, TNEA, LPA). "
+        "The context is mostly in English: say what you take from it in natural spoken Tamil "
+        "instead of copying English sentences. Don't switch into a full English sentence partway through."
+    ),
+    "ta_en": (
+        "Reply in natural spoken Chennai Tamil mixed with English (Tanglish), written in "
+        "English letters, the way the visitor just wrote. Not literary, textbook, formal or "
+        "newsreader Tamil. English words stay English (fees, course, application, admission, "
+        "documents, payment, hostel, placement, website, registration, deadline, branch, "
+        "details, process), with Tamil endings attached the way people say them "
+        "(\"application-la\", \"branch-ku\", \"upload pannunga\"). "
+        "Do not write Tamil script in this reply."
     ),
 }
 
-# Added to the system prompt for Tamil replies. First pass, written without a
-# native speaker's review — it needs one before launch (Voice Naturalness
-# Plan, steps I/J).
+# Added to the system prompt for Tamil and Tamil-English replies. First pass,
+# written without a native speaker's review - it needs one before launch
+# (Voice Naturalness Plan, steps I/J).
 TAMIL_STYLE = """
 
-Tamil style — you are replying in Tamil:
-- Speak polite, everyday spoken Tamil, the way a helpful person at a college
-  front office talks to a parent or student: "இருக்கு", "சொல்லுங்க",
-  "பார்க்கலாம்", and always the respectful "நீங்க / உங்க".
-- No slang and nothing over-familiar or crude: never "டா", "மச்சி", "பா",
-  "ஆம்பளை", "பொம்பளை", "பசங்க", "பொண்ணுங்க". Say "மாணவர்கள்" and
-  "மாணவிகள்".
-- Not bookish either: avoid stiff written forms like "உள்ளது", "ஆகும்",
-  "வழங்கப்படுகிறது" when a spoken form exists ("இருக்கு", "கிடைக்கும்").
-- Mix English in the way people in Chennai do today. Everyday English words
-  stay English, written in Tamil letters: காலேஜ், கோர்ஸ், ஃபீஸ், ஹாஸ்டல்,
-  அட்மிஷன், அப்ளிகேஷன், ப்ளேஸ்மென்ட், கேம்பஸ், லைப்ரரி, டீட்டெயில்ஸ்,
-  டைம், கிளாஸ், ஃப்ரீ, வாட்ஸ்அப். English verbs get Tamil endings:
-  "அப்ளை பண்ணுங்க", "கான்டாக்ட் பண்ணலாம்", "அனுப்பிடுறேன்". Don't swap
-  these for formal Tamil (கட்டணம், விடுதி, சேர்க்கை, வேலைவாய்ப்பு,
-  விண்ணப்பம்) — that sounds old-fashioned on a phone call.
-- Spoken endings and short, friendly phrasing, like "நிச்சயமா", "புரிஞ்சுது",
-  "சொல்லுங்க", "பண்ணிடலாம்". A quick "சரி" or "ஓகே" is natural, but don't
-  open every reply with one.
+Tamil style - you are replying in spoken Chennai Tamil:
+- Talk like a helpful person at a college front office: everyday spoken Tamil,
+  short and friendly, "இருக்கு", "சொல்லுங்க", "பார்க்கலாம்", and the respectful
+  "நீங்க / உங்க". Spoken endings (படிக்கிறாங்க, வேணும், புரிஞ்சுது), never
+  written ones (உள்ளது, ஆகும், வழங்கப்படுகிறது).
+- Mix English the way Chennai does today. Everyday English words stay English;
+  do not swap them for formal Tamil (கட்டணம், விடுதி, சேர்க்கை, வேலைவாய்ப்பு,
+  விண்ணப்பம்). English verbs get Tamil endings: "apply பண்ணுங்க",
+  "contact பண்ணலாம்".
+- Never crude or over-familiar words: no "ஆம்பளை", "பொம்பளை", "பசங்க",
+  "பொண்ணுங்க". Say "மாணவர்கள்" and "மாணவிகள்" in Tamil script.
+- The campus is at Thalambur (தாழம்பூர்), never Tambaram (தாம்பரம்), a different place.
 - Say numbers and amounts the way they are spoken in Tamil."""
 
-_LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
-_REPLY_LANGUAGE_MARKER = re.compile(r"reply_language:\s*(en|ta)\b")
+TANGLISH_STYLE = """
+
+Tanglish style - the visitor is mixing Tamil and English in English letters:
+- Reply in the same mix, in English letters. Short, spoken, friendly - the way a
+  helpful senior student answers a junior, not the way a form is worded.
+- Use "bro" or "anna" only if the visitor did; otherwise stay polite
+  ("neenga", "unga").
+- Keep English words English and attach Tamil endings to them: "Application
+  online-la pannalaam", "documents upload pannunga", "branch-ku branch maarum".
+- Ask one short follow-up question when it moves things along.
+- The campus is at Thalambur, never Tambaram, which is a different place.
+- No crude words and no Tamil script in this reply.
+
+Examples of the tone (the facts must still come from the context):
+Visitor: "Bro B.Tech fees evlo?"
+You: "B.Tech fees branch-ku branch maarum bro. Entha branch paakureenga?"
+Visitor: "Anna application epdi panrathu?"
+You: "Application online-la pannalaam. Website-la details fill pannitu documents upload pannunga."
+Visitor: "Hostel iruka?"
+You: "Yes bro, hostel facility irukku. Boys-aa girls-aa?"
+"""
+
+# Which extra style block each reply style gets.
+STYLE_BLOCKS = {"ta": TAMIL_STYLE, "ta_en": TANGLISH_STYLE}
+
+_REPLY_LANGUAGE_MARKER = re.compile(r"reply_language:\s*(ta_en|en|ta)\b")
 
 
 def _reply_language(messages: list[dict]) -> str:
-    """Which single language this reply must be in.
+    """Which single reply style this reply must be in: "en", "ta" or "ta_en".
 
     Voice: voice-pipeline puts a `reply_language: xx` marker in its persona
-    message — the call's current language, which it tracks from the audio and
-    which is more reliable than reading a transcript's script (Tamil speech is
-    sometimes transcribed in Latin letters). Typed chat and phone: the script
-    of the visitor's most recent turn that is long enough to tell; a bare
-    "ok" or a number inherits the language of the turns before it."""
+    message - the style it classified for this turn from the transcript, which
+    it can also adjust for what it knows about the audio (Tamil speech is
+    sometimes transcribed in Latin letters). Typed chat and phone: the style of
+    the visitor's most recent turn that shows one (language_style.py); a bare
+    "ok" or a number inherits the style of the turns before it."""
     for m in messages:
         if m.get("role") == "system":
             marker = _REPLY_LANGUAGE_MARKER.search(m.get("content") or "")
@@ -415,11 +481,9 @@ def _reply_language(messages: list[dict]) -> str:
     for m in reversed(messages):
         if m.get("role") != "user":
             continue
-        text = m.get("content") or ""
-        if any(ord(ch) in TAMIL_UNICODE_BLOCK for ch in text):
-            return "ta"
-        if len(_LATIN_WORD.findall(text)) >= 3:
-            return "en"
+        style = detect_style(m.get("content") or "")
+        if style:
+            return style.lower()
     return "en"
 
 
@@ -672,7 +736,7 @@ async def _build_full_messages(
         context = NO_LOOKUP_CONTEXT
         logger.info("[timing] retrieval skipped (small talk)")
     else:
-        if language == "ta" or any(ord(ch) in TAMIL_UNICODE_BLOCK for ch in query):
+        if language in ("ta", "ta_en") or any(ord(ch) in TAMIL_UNICODE_BLOCK for ch in query):
             query = await _english_search_query(query)
             logger.info("[timing] search-query translation %.0f ms",
                         (time.perf_counter() - t0) * 1000)
@@ -687,13 +751,17 @@ async def _build_full_messages(
             context = "No matching context found."
         logger.info("[timing] retrieval %.0f ms (query %d chars)",
                     (time.perf_counter() - t0) * 1000, len(query))
+    # One line per turn that voice-pipeline's [turn] line can be matched with
+    # (same session id prefix, same order).
+    logger.info("[turn-backend] session=%s reply_style=%s rag_ms=%.0f",
+                (session_id or "-")[:8], language, (time.perf_counter() - t0) * 1000)
     return [
         {
             "role": "system",
             "content": SYSTEM_PROMPT_TEMPLATE.format(context=context)
             + (VOICE_BREVITY_ADDENDUM if voice else "")
             + (BACKCHANNEL_ADDENDUM if kind == "ack" else "")
-            + (TAMIL_STYLE if language == "ta" else "")
+            + STYLE_BLOCKS.get(language, "")
             + derive_state(messages, session_id).prompt_block(),
         },
         *messages,  # preserves every prior user/assistant turn
@@ -733,6 +801,7 @@ async def _generate_reply(
         model=CHAT_MODEL,
         messages=full_messages,
         tools=[CAPTURE_LEAD_TOOL],
+        **({"tool_choice": FORCE_CAPTURE_LEAD} if _should_force_lead_capture(messages, session_id) else {}),
         extra_body=DISABLE_REASONING,
     )
     choice = response.choices[0]
@@ -782,6 +851,10 @@ async def _stream_reply_sse(
             messages=current_messages,
             stream=True,
             tools=[CAPTURE_LEAD_TOOL],
+            # First round only: the follow-up round (after the tool result) must
+            # be free to answer in words.
+            **({"tool_choice": FORCE_CAPTURE_LEAD}
+               if round_no == 0 and _should_force_lead_capture(messages, session_id) else {}),
             extra_body=DISABLE_REASONING,
         )
         tool_calls: dict[int, dict] = {}
@@ -816,6 +889,9 @@ async def _stream_reply_sse(
                     if content_chunk_count == 1:
                         logger.info("[timing] round %d first content %.0f ms after request start",
                                     round_no + 1, (time.perf_counter() - t_start) * 1000)
+                        logger.info("[turn-backend] session=%s round=%d llm_first_token_ms=%.0f (from request start, includes retrieval)",
+                                    (session_id or "-")[:8], round_no + 1,
+                                    (time.perf_counter() - t_start) * 1000)
                     yield f"data: {chunk.model_dump_json()}\n\n"
         except Exception:
             logger.exception(

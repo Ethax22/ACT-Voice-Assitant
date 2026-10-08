@@ -44,9 +44,14 @@ embeddings only; gspread + google-auth; openpyxl + pdfplumber for data files.
 
 **Per-turn flow (`_build_full_messages`)**
 1. `developer` role → `system` (Sarvam rejects `developer`).
-2. Reply language decided in code (`_reply_language`): the `reply_language: xx` marker
-   from voice-pipeline's persona message if present (then removed), else the script of
-   the latest long-enough user turn (Tamil Unicode block → `ta`).
+2. Reply style decided in code (`_reply_language`), one of `en` / `ta` / `ta_en`
+   (*updated 2026-10-09*): the `reply_language: xx` marker from voice-pipeline's persona
+   message if present (then removed), else `language_style.detect_style` on the latest
+   user turn that shows a style (Tamil script → `ta`, romanized Tamil words such as
+   "evlo", "iruka", "epdi" → `ta_en`, plain English → `en`; a bare "okay" inherits).
+   `ta_en` replies are spoken Chennai Tamil/English in English letters (`TANGLISH_STYLE`);
+   `ta` replies are spoken Tamil mostly in Tamil script with everyday English words left
+   in English (`TAMIL_STYLE`). The old rule that forced pure Tamil script is gone.
 3. Query choice: `_retrieval_query` (short turns reuse the last substantive question);
    "ack" turns ("yes", "சரி") search on the assistant's last question; greetings,
    closings and bare acknowledgements skip retrieval entirely.
@@ -94,7 +99,7 @@ transport.input (FastAPIWebsocket + RawPCMSerializer, 16 kHz in / 24 kHz out)
  → ConversationRouter
  → user aggregator (local VAD + turn strategies)
  → OpenAILLMService (base_url = rag-backend /v1, X-Session-Id header)
- → TTS (stock SarvamTTS, or ServiceSwitcher over stock + cloned services)
+ → TTS (ONE service for the whole call: the cloned About Us voice if configured, else the stock About Us voice)
  → GreetingPlayer → transport.output
  → AudioBufferProcessor → assistant aggregator → TranscriptLogger → LatencyLogger
 ```
@@ -110,33 +115,42 @@ strategy: English = smart-turn v3 (max wait 1.5 s); Tamil = plain 0.5 s silence 
 `TURN_MODE=sarvam` restores Sarvam server-side turns (silence 700 ms, VAD threshold 0.5).
 None of these timings is tuned on a real microphone yet.
 
-**ConversationRouter (`conversation_router.py`).**
-- Topic voice: keyword classifier (about-us / admissions / courses / placements) picks
-  the TTS voice for the next reply (`ritu` / `sunny` / `aayan` / `shreya`, same names for
-  both languages), and sends the browser `{"type":"topic"}` so the avatar tile highlights.
+**ConversationRouter (`conversation_router.py`)** *(rewritten 2026-10-09)*.
+- Never waits. The transcript goes to the LLM as soon as it is final.
+- Reply style per turn: `style_classifier.py` (Tamil Unicode, a romanized-Tamil word
+  list, English word counts; no network) gives `en` / `ta` / `ta_en`; a bare "okay"
+  keeps the call's current style. On a change it pushes the matching persona
+  (`PERSONA_PROMPTS` in `pipeline.py`) and the TTS language (`ta_en` speaks with
+  `TA_EN_TTS_LANGUAGE`, default `ta-IN`).
+- Topic: the keyword classifier (about-us / admissions / courses / placements) only sends
+  the browser `{"type":"topic"}` so the avatar tile highlights. It does not change the voice.
 - Language switching mid-call: when the local VAD reports end of speech, a background
-  batch detection runs on that utterance (≥1 s). An ordinary turn's transcript is held up
-  to 0.25 s for it; the first turn or a suspicious transcript waits up to 2.5 s. Tamil
-  script on an `en` call switches with no API call. Switching needs 0.7 confidence and
-  replaces the realtime transcript with the batch one. Spoken phrases ("speak Tamil",
-  "in English") also switch. A switch sends live STT / TTS / LLM settings-update frames
-  (no reconnect) and resets to the about-us voice.
+  batch detection runs on that utterance (≥1 s). The result is applied when it arrives
+  (it can still land before the LLM request is built, as it did in the first-turn Tamil
+  test) and otherwise from the next turn. Tamil script on an `en` call switches at once
+  with no API call. Spoken phrases ("speak Tamil", "in English") also switch. A switch
+  sends live STT / persona / TTS-language settings-update frames (no reconnect) and does
+  NOT touch the voice. Known cost: Tamil spoken to an English-locked STT can arrive as a
+  fluent wrong English sentence, so a Tamil first sentence may be answered from bad text.
 - `maybe_auto_switch_language` is unused (no caller).
 
 **Language detection (`language_detection.py`):** Sarvam batch STT `POST /speech-to-text`
 (`saaras:v4`, `language_code=unknown`), ~0.6–0.8 s. Realtime STT `auto` was tested and found
 unreliable. Used for the widget's start-of-call snippet and for mid-call detection.
 
-**Voices.** Default: Sarvam stock voices. Cloned: one voice id per *topic*
-(`CLONED_VOICE_ID_ABOUT_US|ADMISSIONS|COURSES|PLACEMENTS`), cross-lingual, so one staff
-recording per topic serves both languages. By default (`CLONED_VOICE_TRANSPORT=persistent`)
-`PersistentClonedVoiceTTSService` keeps ONE websocket per cloned voice open for the call
+**Voices.** One voice per call (*2026-10-09*): the About Us voice. Default: the Sarvam
+stock voice `ritu`. Cloned: `CLONED_VOICE_ID_ABOUT_US` (cross-lingual, so it speaks every
+style); `CLONED_VOICE_ID_ADMISSIONS|COURSES|PLACEMENTS` are no longer read. By default (`CLONED_VOICE_TRANSPORT=persistent`)
+`PersistentClonedVoiceTTSService` keeps ONE websocket open for the call
 (`wss://api.sarvam.ai/voices/clone/ws`, built on Pipecat's `SarvamTTSService`), so sentences
 of a reply play without gaps. `CLONED_VOICE_TRANSPORT=per_utterance` selects the older
 `ClonedVoiceTTSService`, which opens a websocket per sentence and falls back to the
 non-streaming `POST /voices/clone` if the websocket fails before any audio. Both get the same
 text filter and delivery settings as the stock voice. Cloned voice first
-audio was measured ~1.7 s (2026-10-08). No staff recordings exist yet, so stock voices are in use.
+audio is ~1.3-2.8 s per reply even on the persistent connection (2026-10-09 test, 9 turns):
+Sarvam's per-utterance start-up is not removed by keeping the websocket open. The stock-voice
+buffer default is now `TTS_MIN_BUFFER_SIZE=40` (was 120) so a short first sentence is spoken
+at once; the effect on smoothness is not yet judged by ear.
 `greeting_cache.py` pre-renders each greeting to disk and plays it instantly through
 `GreetingPlayer`; falls back to live TTS and renders for the next call.
 

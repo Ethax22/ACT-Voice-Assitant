@@ -20,6 +20,11 @@ and autonomous status.
 - **Director:** Dr. Vishnu Jayaprakash, CEO & co-founder of AgZen
 - **Advisor:** Prof. Dr. T. S. Natarajan, former IIT Madras professor
 - **Principal:** Dr. Srinivasan Alavandar (PhD, IIT Roorkee)
+- **Head of the Innovation and Product Development (IPD) Cell:** Dr. P. Purushothaman, 
+  Associate Professor, Mechanical Engineering (also Convenor of the Institution's Innovation Council, 
+  listed there as "Head / IPD"). Confirmed by Prakash 2026-10-09. The IPD Cell page also names the 
+  Principal, Dr. Srinivasan Alavandar, as Chief Mentor and Dr. R. Pandiyarajan (HoD, Mechatronics) 
+  as Coordinator, but the head of the IPD Cell is Dr. P. Purushothaman.
 
 ## Vision
 To be one among the top institutions offering engineering and technology

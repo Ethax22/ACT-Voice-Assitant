@@ -103,6 +103,32 @@ SCENARIOS = [
     ("switch-en-to-ta", "en", [("say", "What courses do you offer?"), ("say", "சேர்க்கைக்கு எப்படி விண்ணப்பிப்பது?", "ta")]),
     ("switch-ta-to-en", "ta", [("say", "விடுதி வசதி இருக்கிறதா?"), ("say", "How are the placements at your college?", "en")]),
 ]
+# Zimi P0 validation (2026-10-09): the nine inputs from the brief, one fresh call
+# each (calls open on English now, so the Tamil lines also exercise the
+# first-turn switch), plus one call that runs them back to back to check that a
+# style carries across a bare "okay". Romanized lines are synthesized with the
+# Tamil locale so they come out with Tamil pronunciation. Read the results in
+# the voice-pipeline log's `[turn]` lines and the backend's `[turn-backend]`
+# lines (docs/Zimi_P0_Validation.md says how).
+P0_INPUTS = [
+    ("p0-1-tamil-fee", "கட்டணம் எவ்வளவு?"),
+    ("p0-2-fees-evlo-bro", "fees evlo bro?"),
+    ("p0-3-btech-fees-evlo", "B.Tech fees evlo?"),
+    ("p0-4-english-btech-fee", "What is the B.Tech fee?"),
+    ("p0-5-application-epdi", "Anna application epdi panrathu?"),
+    ("p0-6-hostel-iruka", "hostel iruka?"),
+    ("p0-7-seri", "seri"),
+    ("p0-8-okay", "okay"),
+    ("p0-9-cse-fees-bro", "CSE fees evlo bro?"),
+]
+SCENARIOS += [
+    (name, "en", [("say", text, "en" if text == "What is the B.Tech fee?" or text == "okay" else "ta")])
+    for name, text in P0_INPUTS
+]
+SCENARIOS.append((
+    "p0-sequence", "en",
+    [("say", text, "en" if text in ("What is the B.Tech fee?", "okay") else "ta") for _, text in P0_INPUTS],
+))
 LEAD_SCENARIO = ("en-lead-capture", "en", [
     ("say", "I want to apply for computer science engineering."),
     ("say", "My name is Scenario Test."),
@@ -315,11 +341,11 @@ def summarize(rows: list[dict]) -> str:
             )
     words = values("reply_words", lambda r: r.get("reply_words", 0) > 0)
     if words:
-        short = sum(1 for w in words if 5 <= w <= 25)
-        long_ = sum(1 for w in words if w > 45)
+        short = sum(1 for w in words if 30 <= w <= 55)
+        long_ = sum(1 for w in words if w > 70)
         lines.append(
-            f"Reply length: median {statistics.median(words):.0f} words; {short}/{len(words)} in the 5-25 "
-            f"word range; {long_}/{len(words)} over 45 words (target under 10%)"
+            f"Reply length: median {statistics.median(words):.0f} words; {short}/{len(words)} in the 30-55 "
+            f"word range; {long_}/{len(words)} over 70 words (target under 10%)"
         )
     overs = [r for r in rows if r["step"] == "over" and "note" not in r]
     if overs:
@@ -352,7 +378,10 @@ async def main():
                         help="also run the lead-capture call (writes a real row to the leads Sheet)")
     args = parser.parse_args()
 
-    scenarios = SCENARIOS + ([LEAD_SCENARIO] if args.include_lead else [])
+    # The Zimi P0 scenarios only run when asked for (--only p0): they are a
+    # separate check, not part of the regression set.
+    scenarios = [s for s in SCENARIOS if args.only or not s[0].startswith("p0-")]
+    scenarios += [LEAD_SCENARIO] if args.include_lead else []
     if args.only:
         scenarios = [s for s in scenarios if args.only in s[0]]
     rows = []
