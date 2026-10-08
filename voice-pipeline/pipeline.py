@@ -17,6 +17,7 @@ docs/Voice_Model_Choices.md for rationale):
   `language_code` is configured per language.
 - TTS: bulbul:v3 (bulbul:v2 is deprecated — Sarvam's API now rejects it)
 """
+import asyncio
 import os
 from typing import Literal
 
@@ -215,7 +216,9 @@ def build_pipeline(websocket, language: Language, session_id: str):
         FastAPIWebsocketTransport,
     )
 
+    import greeting_cache
     from conversation_logger import TranscriptLogger, save_session_audio
+    from greeting_cache import GreetingPlayer, PlayGreetingFrame
     from conversation_router import ConversationRouter, ConversationRouterCallbacks, TOPIC_VOICES
     from latency_metrics import LatencyLogger
     from raw_pcm_serializer import RawPCMSerializer
@@ -333,17 +336,43 @@ def build_pipeline(websocket, language: Language, session_id: str):
     if configured_clones:
         import aiohttp
 
-        from cloned_voice_tts import ClonedVoiceTTSService
+        from cloned_voice_tts import ClonedVoiceTTSService, PersistentClonedVoiceTTSService
 
-        cloned_voice_http_session = aiohttp.ClientSession()
+        # CLONED_VOICE_TRANSPORT=persistent (default): one long-lived websocket
+        # per cloned voice for the whole call. =per_utterance: the earlier
+        # version that opens a websocket per sentence (kept as a fallback).
+        transport_mode = os.environ.get("CLONED_VOICE_TRANSPORT", "persistent").lower()
+        voice_tuning = dict(
+            # Same clean-up and delivery tuning as the stock voice above.
+            # Without text_transforms the cloned voices read raw text: the
+            # pronunciation fixes in speech_text_filter ("EEE" -> "triple E",
+            # "CSE" -> "C S E", years, markdown) only applied to the stock
+            # voice, so they vanished when cloned voices went live.
+            text_transforms=[("*", to_speech)],
+            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "120")),
+            max_chunk_length=int(os.environ.get("TTS_MAX_CHUNK_LENGTH", "300")),
+            **_optional_float_settings(pace="TTS_PACE", temperature="TTS_TEMPERATURE"),
+        )
+        if transport_mode == "per_utterance":
+            cloned_voice_http_session = aiohttp.ClientSession()
         for topic, voice_id in configured_clones.items():
-            cloned_services_by_topic[topic] = ClonedVoiceTTSService(
-                api_key=sarvam_api_key,
-                aiohttp_session=cloned_voice_http_session,
-                voice_id=voice_id,
-                language_code=language_code,
-                sample_rate=24000,
-            )
+            if transport_mode == "per_utterance":
+                cloned_services_by_topic[topic] = ClonedVoiceTTSService(
+                    api_key=sarvam_api_key,
+                    aiohttp_session=cloned_voice_http_session,
+                    voice_id=voice_id,
+                    language_code=language_code,
+                    sample_rate=24000,
+                    **voice_tuning,
+                )
+            else:
+                cloned_services_by_topic[topic] = PersistentClonedVoiceTTSService(
+                    api_key=sarvam_api_key,
+                    voice_id=voice_id,
+                    language_code=language_code,
+                    sample_rate=24000,
+                    **voice_tuning,
+                )
         logger.info(f"Using cloned voices for topics: {sorted(configured_clones)}")
 
     if cloned_services_by_topic:
@@ -424,6 +453,8 @@ def build_pipeline(websocket, language: Language, session_id: str):
         context, session_id=session_id, language=lambda: router.language
     )
 
+    greeting_player = GreetingPlayer()
+
     pipeline = Pipeline(
         [
             transport.input(),
@@ -432,6 +463,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
             user_aggregator,
             llm,
             tts,
+            greeting_player,
             transport.output(),
             audio_logger,
             assistant_aggregator,
@@ -462,9 +494,23 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # closes that gap for both languages at once, since they share one
     # pipeline. append_to_context defaults to True, so a visitor who refers
     # back to the greeting ("what did you just say?") has it in history.
+    #
+    # Updated 2026-10-08: played from a pre-rendered clip (greeting_cache.py)
+    # instead of live TTS. A cloned voice needs ~1.7 s before its first audio,
+    # so a live greeting started ~2.3 s after connect and any early words from
+    # the visitor cancelled it before it was heard or logged. The clip starts
+    # at once and is still interruptible like any other bot speech. If the
+    # clip isn't cached yet, this call uses live TTS and the clip is rendered
+    # in the background for the next call.
     @transport.event_handler("on_client_connected")
     async def _on_client_connected(transport, client):
-        await worker.queue_frames([TTSSpeakFrame(GREETINGS[language])])
+        cloned, stock = greeting_cache.about_us_voice(language)
+        clip = greeting_cache.load(language, cloned, stock, GREETINGS[language])
+        if clip:
+            await worker.queue_frames([PlayGreetingFrame(GREETINGS[language], clip)])
+        else:
+            await worker.queue_frames([TTSSpeakFrame(GREETINGS[language])])
+            asyncio.create_task(greeting_cache.ensure_rendered(language))
 
     # On hangup, tear the whole pipeline down. Without this the Sarvam STT
     # websocket stays open until its 60s inactivity timeout fires an error.

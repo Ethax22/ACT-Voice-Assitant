@@ -43,6 +43,7 @@ reasoned starting values, same caveat as VAD_TUNING in pipeline.py.
 """
 import asyncio
 import os
+import re
 import time
 
 from loguru import logger
@@ -78,6 +79,24 @@ SILENCE_TIMEOUT_SECS = float(os.environ.get("TURN_SILENCE_TIMEOUT_SECS", "0.5"))
 # visitor hasn't finished (Pipecat's default is 3 s).
 SMART_TURN_MAX_WAIT = float(os.environ.get("SMART_TURN_MAX_WAIT_SECS", "1.5"))
 
+# Added 2026-10-08 (Prakash: wind, breath and room noise were interrupting the
+# bot and it then did not answer): while the bot is talking or about to talk,
+# sound alone no longer interrupts it. The visitor's speech has to turn into
+# real words first — see `is_real_interruption`. Set BARGE_IN_REQUIRE_WORD=0 to
+# get the earlier behaviour back (sustained speech interrupts by itself).
+BARGE_IN_REQUIRE_WORD = os.environ.get("BARGE_IN_REQUIRE_WORD", "1") != "0"
+# A transcript only counts if the local VAD heard speech this recently, so a
+# word the speech-to-text invents from noise the VAD rejected is ignored.
+VAD_RECENT_SECS = 2.5
+
+# Single words that interrupt on their own ("wait", "stop"...). Anything else
+# needs at least two words.
+_INTERRUPT_WORDS = frozenset({
+    "wait", "stop", "hold", "sorry", "excuse", "pardon", "hello", "no", "actually",
+    "நிறுத்து", "நிறுத்துங்க", "நில்லுங்க", "இருங்க", "இல்ல", "வேண்டாம்", "ஒரு",
+})
+_WORD = re.compile(r"[A-Za-z஀-௿]{2,}")
+
 # Acknowledgements that should not cut the bot off mid-reply. Kept in line
 # with rag-backend/main.py's _BACKCHANNELS, which handles the same words when
 # they arrive as a turn of their own.
@@ -92,6 +111,17 @@ _PUNCTUATION = str.maketrans("", "", ".,!?;:\"'…")
 
 def is_backchannel(text: str) -> bool:
     return (text or "").translate(_PUNCTUATION).strip().lower() in _BACKCHANNELS
+
+
+def is_real_interruption(text: str) -> bool:
+    """True if `text` is words a person said to the bot, not a stray sound the
+    speech-to-text turned into a syllable ("She.", "And", "Hm")."""
+    if is_backchannel(text):
+        return False
+    words = [w.lower() for w in _WORD.findall(text or "")]
+    if len(words) >= 2:
+        return any(not is_backchannel(w) for w in words)
+    return bool(words) and words[0] in _INTERRUPT_WORDS
 
 
 class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
@@ -111,6 +141,7 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._sustain_task: asyncio.Task | None = None
         self._short_burst_at = 0.0
         self._reply_pending_until = 0.0
+        self._last_vad_speech_at = 0.0
 
     async def handle_user_turn_started(self):
         self._reply_pending_until = 0.0
@@ -134,11 +165,15 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
             self._bot_speaking = False
             self._reply_pending_until = 0.0
         elif isinstance(frame, VADUserStartedSpeakingFrame):
+            self._last_vad_speech_at = time.monotonic()
             if not self._bot_busy():
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
+            if BARGE_IN_REQUIRE_WORD:
+                # Bot is busy: wait for words (see _handle_transcript).
+                return ProcessFrameResult.CONTINUE
             if time.monotonic() - self._short_burst_at < BARGE_IN_RESUME_WINDOW_SECS:
-                logger.debug(f"{self}: second burst of speech — interrupting")
+                logger.info("[interrupt] second burst of speech within 1 s of a short one — interrupting")
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
             await self._cancel_sustain_timer()
@@ -146,6 +181,7 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 self._sustain_timer(), f"{self}::_sustain_timer"
             )
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._last_vad_speech_at = time.monotonic()
             # Speech ended before the timer ran out: a short burst. Whether it
             # interrupts is now up to what it turns out to say (below), or to
             # the visitor speaking again straight away (above).
@@ -160,19 +196,32 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
         text = (frame.text or "").strip()
         if not text:
             return ProcessFrameResult.CONTINUE
-        if self._bot_busy() and isinstance(frame, InterimTranscriptionFrame) and len(text.split()) < 3:
+        kind = "final" if isinstance(frame, TranscriptionFrame) else "interim"
+        if self._bot_busy() and BARGE_IN_REQUIRE_WORD:
+            heard_speech = time.monotonic() - self._last_vad_speech_at < VAD_RECENT_SECS
+            if not (heard_speech and is_real_interruption(text)):
+                if kind == "final":
+                    why = "not real words" if heard_speech else "no speech heard by the VAD"
+                    logger.info(f"[interrupt] ignored {text!r} while the bot is busy ({why})")
+                    # Drop it, or it would be prepended to the visitor's next turn.
+                    await self.trigger_reset_aggregation()
+                return ProcessFrameResult.CONTINUE
+        elif self._bot_busy() and isinstance(frame, InterimTranscriptionFrame) and len(text.split()) < 3:
             # A partial like "H" or "Hm" says nothing yet about whether this
             # is "Hmm." or the start of a sentence. Acting on it cut the bot
             # off 60 ms before the final "Hmm." arrived and was ignored (seen
             # in the 2026-10-07 scenario run). The sustain timer and the final
             # transcript decide instead.
             return ProcessFrameResult.CONTINUE
-        if self._bot_busy() and is_backchannel(text):
+        elif self._bot_busy() and is_backchannel(text):
             if isinstance(frame, TranscriptionFrame):
-                logger.debug(f"{self}: ignoring backchannel {text!r} while the bot is speaking")
-                # Drop it, or it would be prepended to the visitor's next turn.
+                logger.info(f"[interrupt] ignored backchannel {text!r} while the bot is speaking")
                 await self.trigger_reset_aggregation()
             return ProcessFrameResult.CONTINUE
+        if self._bot_busy():
+            # Only an actual interruption is worth a log line; while the bot is
+            # idle every partial transcript used to print one.
+            logger.info(f"[interrupt] {kind} transcript {text!r} — interrupting the bot")
         await self.trigger_user_turn_started()
         return ProcessFrameResult.STOP
 
@@ -182,7 +231,7 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
         except asyncio.CancelledError:
             return
         self._sustain_task = None
-        logger.debug(f"{self}: sustained speech over the bot — interrupting")
+        logger.info(f"[interrupt] VAD speech kept going {self._sustain_secs}s over the bot — interrupting")
         await self.trigger_user_turn_started()
 
     async def _cancel_sustain_timer(self):

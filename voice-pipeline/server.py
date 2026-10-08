@@ -32,6 +32,17 @@ async def _prune_logs_on_startup():
     rag-backend/main.py's identical startup hook for the same reasoning."""
     prune_old_logs()
 
+
+@app.on_event("startup")
+async def _prerender_greetings():
+    """Render the greeting clips in the background so the first call after a
+    start (or after a voice/pace/text change) already finds them cached."""
+    import asyncio
+
+    import greeting_cache
+
+    asyncio.create_task(greeting_cache.prewarm())
+
 WIDGET_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get("WIDGET_ALLOWED_ORIGINS", "*").split(",")

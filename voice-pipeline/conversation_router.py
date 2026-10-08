@@ -491,7 +491,13 @@ class ConversationRouter(FrameProcessor):
             await self._switch_language(switch_target)
             return  # meta-command, not a real question — skip topic voice pick
 
-        category = classify_category(text, self._language) or "about-us"
+        category = classify_category(text, self._language)
+        if category is None:
+            # No topic in this utterance (a stray "I", "okay", "thank you"):
+            # keep the voice the call is already on. Falling back to
+            # "about-us" here flipped the voice mid-call on junk fragments
+            # (seen in a real call, 2026-10-08: Anas -> Keerthi -> Anas).
+            return
         await self._activate_topic_voice(category)
 
     async def maybe_auto_switch_language(self, detected: Language | None):

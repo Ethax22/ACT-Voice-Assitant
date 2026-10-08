@@ -344,16 +344,25 @@ LANGUAGE_RULES = {
         "Do not write English sentences and do not switch to English partway through. "
         "The context is mostly in English: translate what you take from it into Tamil "
         "instead of copying English phrases (say \"விசாலமான அறைகள்\", not \"spacious rooms\"). "
-        "Keep in English letters only what has no everyday Tamil word: the college's "
-        "name, course and degree names (B.Tech, CSE), and terms like Wi-Fi, NAAC, TNEA. "
+        "Keep in English letters only the college's name, course and degree names "
+        "(B.Tech, CSE) and acronyms like Wi-Fi, NAAC, TNEA, LPA. Every other English "
+        "word must be written in Tamil letters, never in Latin letters (\"சீசன்\", "
+        "\"கேம்பஸ்ல\", \"டைனிங் ஹால்\", \"ஹைஸ்ட் பேக்கேஜ்\", not \"season\", \"campus-ல\", "
+        "\"dining hall\"). "
         # The style block higher up was not enough by itself: typed-chat replies
         # still said "பசங்க"/"பொண்ணுங்க" until this was restated here.
         "Use polite spoken Tamil with நீங்க/உங்க. For boys and girls always say "
         "மாணவர்கள் and மாணவிகள் (for example: \"மாணவர்களுக்கும் மாணவிகளுக்கும் தனித்தனி "
-        "விடுதி இருக்கு\"); the words பசங்க, பையன், பையன்கள், பொண்ணு, பொண்ணுங்க, ஆம்பளை "
-        "and பொம்பளை must not appear in your reply. Use the Tamil words கல்லூரி, "
-        "படிப்பு, கட்டணம், விடுதி, சேர்க்கை, விண்ணப்பிக்க, தொடர்பு கொள்ள, தொலைபேசி எண் "
-        "instead of English words written in Tamil letters. The campus is at Thalambur, "
+        "ஹாஸ்டல் இருக்கு\"); the words பசங்க, பையன், பையன்கள், பொண்ணு, பொண்ணுங்க, ஆம்பளை "
+        "and பொம்பளை must not appear in your reply. Talk like everyday "
+        "Chennai Tamil, not textbook Tamil: use the English words people really say, "
+        "written in Tamil letters — காலேஜ், கோர்ஸ், ஃபீஸ், ஹாஸ்டல், அட்மிஷன், "
+        "அப்ளிகேஷன், ப்ளேஸ்மென்ட், கேம்பஸ், டீட்டெயில்ஸ், நம்பர், டைம், கிளாஸ், "
+        "ஃப்ரீ, வாட்ஸ்அப், கான்டாக்ட் — and give English verbs Tamil endings "
+        "(\"அப்ளை பண்ணுங்க\", \"கான்டாக்ட் பண்ணலாம்\", \"அனுப்பிடுறேன்\"). Avoid "
+        "formal words like கட்டணம், விடுதி, சேர்க்கை, வேலைவாய்ப்பு, விண்ணப்பம், "
+        "தொலைபேசி எண், தொடர்பு கொள்ள. Use spoken endings (படிக்கிறாங்க, இருக்கு, "
+        "வேணும், நிச்சயமா, புரிஞ்சுது), never written ones (உள்ளது, ஆகும்). The campus is at Thalambur, "
         # A test reply turned "Thalambur" into "தாம்பரம்" (Tambaram, a different place).
         "written தாழம்பூர் in Tamil — never தாம்பரம், which is a different place."
     ),
@@ -373,11 +382,16 @@ Tamil style — you are replying in Tamil:
   "மாணவிகள்".
 - Not bookish either: avoid stiff written forms like "உள்ளது", "ஆகும்",
   "வழங்கப்படுகிறது" when a spoken form exists ("இருக்கு", "கிடைக்கும்").
-- Use the ordinary Tamil word when there is one everybody uses: கட்டணம்
-  (fees), விடுதி (hostel), சேர்க்கை (admission), படிப்பு (course),
-  வேலைவாய்ப்பு (placement), நூலகம் (library), விண்ணப்பம் (application).
-  Don't spell English words out in Tamil letters ("ஹாஸ்டல்", "ஃபீஸ்",
-  "அட்மிஷன்") when such a word exists.
+- Mix English in the way people in Chennai do today. Everyday English words
+  stay English, written in Tamil letters: காலேஜ், கோர்ஸ், ஃபீஸ், ஹாஸ்டல்,
+  அட்மிஷன், அப்ளிகேஷன், ப்ளேஸ்மென்ட், கேம்பஸ், லைப்ரரி, டீட்டெயில்ஸ்,
+  டைம், கிளாஸ், ஃப்ரீ, வாட்ஸ்அப். English verbs get Tamil endings:
+  "அப்ளை பண்ணுங்க", "கான்டாக்ட் பண்ணலாம்", "அனுப்பிடுறேன்". Don't swap
+  these for formal Tamil (கட்டணம், விடுதி, சேர்க்கை, வேலைவாய்ப்பு,
+  விண்ணப்பம்) — that sounds old-fashioned on a phone call.
+- Spoken endings and short, friendly phrasing, like "நிச்சயமா", "புரிஞ்சுது",
+  "சொல்லுங்க", "பண்ணிடலாம்". A quick "சரி" or "ஓகே" is natural, but don't
+  open every reply with one.
 - Say numbers and amounts the way they are spoken in Tamil."""
 
 _LATIN_WORD = re.compile(r"[A-Za-z]{2,}")

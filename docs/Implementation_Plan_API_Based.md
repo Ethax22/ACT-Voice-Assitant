@@ -19,6 +19,10 @@ copy-paste-final code.
 
 ## 0. Current build status (read this before starting any phase)
 
+> **`docs/Architecture_Current.md` (2026-10-08) is the as-built description of
+> all three components.** Where this plan's later sections describe an older
+> design, that file wins.
+
 | Area | Status |
 |---|---|
 | RAG backend core (FastAPI, retrieval, persona, streaming) | ✅ Done — `rag-backend/main.py`, `retriever.py` |
@@ -26,9 +30,9 @@ copy-paste-final code.
 | LLM | ✅ Migrated to Sarvam 105B (Phase 1, 2026-09-25) — reasoning disabled via `extra_body`, see Phase 1 notes |
 | Embeddings | ✅ Staying on Azure OpenAI (`text-embedding-3-small`) — separate from the LLM, kept as-is since Sarvam has no public embeddings API yet |
 | English voice (Deepgram) | ✅ Retired (Phase 2, 2026-09-25) — `voice_agent.py` deleted, `/voice/en` moved to `voice-pipeline/` |
-| English + Tamil voice (`voice-pipeline/`, Sarvam/Pipecat) | 🟡 Built and code-verified (Phases 3-6: generalized pipeline, greeting wired up, voice auto-detect) — still needs a real human listening/mic test (Phase 4 barge-in feel, Phase 5 voice pick), not yet done |
+| English + Tamil voice (`voice-pipeline/`, Sarvam/Pipecat) | 🟡 Built and code-verified (Phases 3-6: generalized pipeline, greeting wired up, voice auto-detect; pre-connect detection switched off 2026-10-08, in-call switching only) — still needs a real human listening/mic test (Phase 4 barge-in feel, Phase 5 voice pick), not yet done |
 | Automatic language detection | 🟡 Built (Phase 6, 2026-09-25) — typed chat fully verified; voice detection verified with synthesized test clips only, not yet a real visitor mic |
-| Voice cloning (Phase 7) | 🟡 Code built and verified live (see §8 below; cloned voice IDs are now per topic, `CLONED_VOICE_ID_ABOUT_US` etc., not per language) — deferred, not a launch blocker. Still needs real staff recordings (left to Prakash) before it's actually usable; also uncovered a real architecture correction (cloned voices need a separate non-streaming TTS path, not a settings swap) — see §8. |
+| Voice cloning (Phase 7) | 🟡 Code built and verified live (see §8 below; cloned voice IDs are now per topic, `CLONED_VOICE_ID_ABOUT_US` etc., not per language) — deferred, not a launch blocker. Still needs real staff recordings (left to Prakash) before it's actually usable. Cloned voices need their own TTS service (not a settings swap); updated 2026-10-08: it now **streams** over Sarvam's `/voices/clone/ws`, with the non-streaming call kept only as fallback. First audio ≈1.7 s, so greetings are pre-rendered (`greeting_cache.py`). See §8. |
 | Lead capture (Phase 8) | ✅ Built and wired to Google Sheets (updated 2026-10-06). `capture_lead` triggers on name+phone in typed chat and the voice/streaming path (no tool-call chunks leak to the voice pipeline), phone numbers are validated, and `rag-backend/.env` has `GOOGLE_SERVICE_ACCOUNT_JSON` + `LEADS_SHEET_ID` set. A phone call through the Calling Agent also produced a lead with `source=phone`, so the Sheet write works. Not yet confirmed from a real website-widget visitor (only dev tests). |
 | Sensitive-question handling (Phase 9) | 🟡 Plumbing built and verified live (`rag-backend/knowledge_base/sensitive_topics.md` retrieved automatically, system prompt prefers "Talking point:" sections near-verbatim, correctly avoids leaking unfinished-content editor notes and avoids fabricating numbers it doesn't have) — **content itself is still draft placeholder text**, not the real admissions/faculty-approved wording CLAUDE.md requires. Needs Prakash/admissions to fill in each `[ADMISSIONS: ...]` bracket in that file before launch. |
 | Logging (Phase 10) | 🟡 Built. Typed chat: verified live end-to-end (`rag-backend/conversation_logger.py`, transcript written and 90-day pruning tested with a synthetic old folder). Voice: `voice-pipeline/conversation_logger.py`'s `TranscriptLogger` + Pipecat's `AudioBufferProcessor` are wired into the pipeline and confirmed to link correctly in a dry (no real audio) pipeline-construction test — **not yet confirmed with a real voice call**, since that needs actual audio flowing through, same category of human-verification gap as Phases 4-6. |
@@ -180,12 +184,21 @@ each:
   saaras:v4`, `language_code: unknown`) — fast (~0.6-0.8s) and accurate (both
   test clips detected at 1.0 confidence). This is what got built.
 
-- **Typed chat:** detects Tamil vs. English directly from the input text's
-  Unicode script client-side in `widget/index.html` (`detectScriptLanguage`,
-  checking for the Tamil Unicode block), before calling `/widget/chat` — no
-  vendor call needed. Auto-switches the UI (labels, placeholder, topic
-  cards) unless the visitor has used the manual toggle.
-- **Voice:** `voice-pipeline/language_detection.py` + a new `POST
+- **Typed chat:** *(updated 2026-10-08)* the widget no longer detects language
+  or switches its UI — its wording is English only. `rag-backend/main.py`
+  (`_reply_language`) picks the reply language from the Unicode script of the
+  visitor's latest long-enough message (Tamil block → Tamil) and enforces it
+  in the final system message.
+- **Voice — pre-connect detection switched off (2026-10-08):** the widget's
+  `DETECT_LANGUAGE_BEFORE_CONNECT` flag is `false`, so every voice call opens
+  `/voice/en` immediately and the in-call router (below) switches to Tamil on
+  the visitor's first Tamil turn. Reason: it added ~2 s before connecting, and
+  it records before the greeting plays, so a visitor waiting to be greeted gave
+  it silence and it fell back to English anyway. Trade-off: a Tamil-first
+  visitor hears an English greeting and a slower first turn. The code and
+  `/detect-language` route are kept; set the flag to `true` to restore it. The
+  description below is how it worked when on.
+- **Voice (pre-connect, when enabled):** `voice-pipeline/language_detection.py` + a new `POST
   /detect-language` route in `voice-pipeline/server.py` (not on rag-backend —
   it's Sarvam-specific and voice-pipeline already holds `SARVAM_API_KEY`).
   The widget buffers ~1.5s of mic audio into the same PCM16 format it already
@@ -195,9 +208,13 @@ each:
   buffered snippet is flushed into the real pipeline connection once it opens
   (in `widget/index.html`'s `startVoiceSession`), so the visitor doesn't have
   to repeat whatever they said during detection.
-- Manual EN/Tamil override kept in the widget UI (`languageManuallySet` flag)
-  — clicking the toggle stops auto-detect from overriding that choice for the
-  rest of the session, for both typed chat and voice.
+- *(Updated 2026-10-08)* The manual EN/Tamil override was removed from the
+  widget with the English-only wording change; there is currently no manual
+  override (CLAUDE.md decision #5 asks for one — flag to Prakash before launch).
+- **Mid-call switching** lives in `voice-pipeline/conversation_router.py`: a
+  background batch detection per utterance (≥1 s), a Tamil-script shortcut, and
+  spoken phrases ("speak Tamil"); needs 0.7 confidence. See
+  `Architecture_Current.md` §3.
 - Not yet done: a real by-ear/by-hand test of detection latency and accuracy
   with an actual visitor mic, as opposed to synthesized test clips — that's
   the same category of human-verification gap as Phase 4's turn-taking test
@@ -228,13 +245,13 @@ module docstring for the full account.
 
 **What got built instead** (real code, not just a plan revision):
 - `voice-pipeline/cloned_voice_tts.py`: `ClonedVoiceTTSService`, a custom
-  Pipecat `TTSService` subclass that calls `POST /voices/clone` per
-  utterance and yields the result as a `TTSAudioRawFrame`, modeled closely
-  on Pipecat's own `SarvamHttpTTSService` (same non-streaming batch-call
-  shape, different endpoint/response field). **Real tradeoff, not free**:
-  this is a full request/response round-trip per bot utterance, not
-  progressive streamed audio — a language using a cloned voice will have a
-  brief pause before speech starts that stock-voice languages don't have.
+  Pipecat `TTSService` subclass. **Updated 2026-10-08:** it streams over
+  `wss://api.sarvam.ai/voices/clone/ws` (Sarvam changelog 2026-10-01) and
+  yields audio chunks as they arrive; the original non-streaming
+  `POST /voices/clone` call (one full WAV per utterance) is kept only as a
+  fallback if the websocket fails before any audio. Measured first audio is
+  still ≈1.7 s, which is why greetings are pre-rendered
+  (`greeting_cache.py`) rather than synthesized live.
 - `voice-pipeline/pipeline.py`: added `CLONED_VOICE_IDS` (read from
   `CLONED_VOICE_ID_EN` / `CLONED_VOICE_ID_TA` env vars). If set for a
   language, `build_pipeline()` swaps in `ClonedVoiceTTSService` for that

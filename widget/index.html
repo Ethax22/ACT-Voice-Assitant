@@ -720,6 +720,10 @@
   // is that duration's worth of 16kHz mono samples.
   const DETECT_LANGUAGE_URL = 'http://localhost:8001/detect-language';
   const DETECTION_SAMPLES = MIC_SEND_SAMPLE_RATE * 1.5;
+  // Pre-connect detection is switched off (2026-10-08): calls always open on
+  // English and the in-call ConversationRouter switches to Tamil on the first
+  // turn. Set to true to bring the old detect-before-connect step back.
+  const DETECT_LANGUAGE_BEFORE_CONNECT = false;
 
   let voiceWs = null;
   let voiceActive = false;
@@ -1030,16 +1034,19 @@
       return;
     }
 
-    // Auto-detect (Phase 6): buffer a short snippet and identify its
-    // language BEFORE opening a pipeline, since which pipeline to open
-    // (persona, TTS voice, everything) depends on the answer. This is only
-    // the STARTING language — voice-pipeline's ConversationRouter re-checks
-    // mid-call only when a turn's transcript doesn't look like the session
-    // language, so a wrong first guess or a mid-call switch still corrects
-    // itself without a detection call on every turn.
-    statusLine.textContent = 'Detecting language…';
-    const { language, chunks: bufferedChunks } = await recordSnippetForDetection(micStream);
-    if (!voiceActive) return; // cancelled (End Call) while detection was in flight
+    // Pre-connect auto-detect (Phase 6) — currently DISABLED, see
+    // DETECT_LANGUAGE_BEFORE_CONNECT. When on, it buffers a short snippet and
+    // identifies its language BEFORE opening a pipeline, since which pipeline
+    // to open (persona, TTS voice, everything) depends on the answer. When
+    // off, every call starts on English and voice-pipeline's
+    // ConversationRouter switches language mid-call from the visitor's turns.
+    let language = null;
+    let bufferedChunks = [];
+    if (DETECT_LANGUAGE_BEFORE_CONNECT) {
+      statusLine.textContent = 'Detecting language…';
+      ({ language, chunks: bufferedChunks } = await recordSnippetForDetection(micStream));
+      if (!voiceActive) return; // cancelled (End Call) while detection was in flight
+    }
     // The detected language only picks which pipeline to open — the widget's
     // own wording stays as it is (2026-10-08, at Prakash's request), so a
     // Tamil-speaking caller no longer flips the labels to Tamil.

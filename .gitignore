@@ -38,3 +38,6 @@ docs/ERP Data/
 
 # Retriever chunk-embedding cache — derived data, rebuilt automatically
 rag-backend/.embedding_cache*.npz
+
+# Pre-rendered greeting audio (voice-pipeline/greeting_cache.py)
+voice-pipeline/greeting_cache/
