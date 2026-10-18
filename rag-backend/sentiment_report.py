@@ -7,6 +7,9 @@ Run after the fact, never during a call — it adds nothing to reply latency:
     python sentiment_report.py --days 30
     python sentiment_report.py --from 2026-10-01 --to 2026-10-07
 
+The running backend also does this by itself (main.py starts run_periodically()
+below): the last 7 days, rebuilt whenever the newest report is a day old.
+
 For each conversation it asks Sarvam 105B (the same model that answers
 visitors — no new vendor) for a small structured judgement, then writes an
 HTML report plus a CSV of the same rows into rag-backend/reports/.
@@ -363,10 +366,16 @@ async def main() -> None:
     end = date.fromisoformat(args.end) if args.end else datetime.now(timezone.utc).date()
     start = date.fromisoformat(args.start) if args.start else end - timedelta(days=args.days - 1)
 
+    await build_report(start, end)
+
+
+async def build_report(start: date, end: date) -> Path | None:
+    """Analyse every conversation in the range and write the report. Returns
+    the HTML path, or None if there was nothing to write."""
     conversations = _load_conversations(start, end)
     if not conversations:
         print(f"No conversations with a visitor turn between {start} and {end}.")
-        return
+        return None
     print(f"Analysing {len(conversations)} conversation(s) from {start} to {end}...")
 
     client = AsyncOpenAI(api_key=os.environ["SARVAM_API_KEY"], base_url="https://api.sarvam.ai/v1")
@@ -380,12 +389,36 @@ async def main() -> None:
     failed = len(conversations) - len(rows)
     if not rows:
         print("Every analysis call failed — no report written.")
-        return
+        return None
     _prune_old_reports()
     html_path, csv_path = _write_report(rows, failed, start, end)
     print(f"Report: {html_path}\nCSV:    {csv_path}")
     if failed:
         print(f"{failed} conversation(s) could not be analysed and were left out.")
+    return html_path
+
+
+async def run_periodically(interval_hours: float, days: int = 7) -> None:
+    """Keep the report current without anyone running this script: rebuild the
+    last `days` days whenever the newest report is older than `interval_hours`.
+    Started by main.py at backend startup. Going by the newest report's age
+    (not time since startup) means a backend that restarts often neither
+    re-runs on every restart nor skips its run forever."""
+    interval = interval_hours * 3600
+    while True:
+        reports = list(REPORTS_DIR.glob("sentiment_*.html")) if REPORTS_DIR.exists() else []
+        age = datetime.now().timestamp() - max((p.stat().st_mtime for p in reports), default=0)
+        if age < interval:
+            await asyncio.sleep(interval - age)
+            continue
+        end = datetime.now(timezone.utc).date()
+        try:
+            await build_report(end - timedelta(days=days - 1), end)
+        except Exception as e:
+            print(f"Automatic sentiment report failed: {e}")
+        # Also the retry delay when nothing was written (no conversations, or
+        # Sarvam unreachable) — the report's age doesn't advance in that case.
+        await asyncio.sleep(min(interval, 3600))
 
 
 if __name__ == "__main__":

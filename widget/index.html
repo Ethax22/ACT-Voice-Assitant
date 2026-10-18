@@ -98,58 +98,92 @@
 
   .hero-hint svg { width: 18px; height: 18px; }
 
-  /* ---------- Floating launcher ---------- */
+  /* ---------- Floating launcher: white pill with a small orb ---------- */
   .launcher {
     position: fixed;
     bottom: 28px;
     right: 28px;
-    width: 62px;
-    height: 62px;
-    border-radius: 50%;
-    background: linear-gradient(145deg, var(--royal), var(--navy));
+    height: 56px;
+    padding: 0 22px 0 10px;
+    border-radius: 999px;
+    background: var(--white);
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 12px;
     cursor: pointer;
-    box-shadow: 0 12px 28px rgba(11,30,61,0.35);
-    border: none;
+    border: 1px solid rgba(11,30,61,0.06);
+    box-shadow: 0 10px 30px rgba(11,30,61,0.16), 0 2px 6px rgba(11,30,61,0.06);
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--navy);
     z-index: 40;
-    transition: transform 0.25s ease;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
   }
-  .launcher:hover { transform: scale(1.06); }
-  .launcher svg { width: 26px; height: 26px; fill: var(--white); }
+  .launcher:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(11,30,61,0.2), 0 2px 6px rgba(11,30,61,0.06); }
+  .launcher .orb { width: 38px; height: 38px; flex-shrink: 0; }
 
-  .launcher::before {
+  /* ---------- The orb (shared by launcher and panel) ---------- */
+  .orb {
+    position: relative;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 16% 36%, #E6DF7C 0%, rgba(230,223,124,0) 42%),
+      radial-gradient(circle at 60% 40%, #3F8496 0%, rgba(63,132,150,0) 48%),
+      radial-gradient(circle at 40% 80%, #BDEBFA 0%, rgba(189,235,250,0) 46%),
+      radial-gradient(circle at 80% 85%, #2BA8E0 0%, rgba(43,168,224,0) 50%),
+      #8FD4F2;
+    background-size: 180% 180%;
+    background-position: 0% 0%;
+    animation: orb-drift 14s ease-in-out infinite alternate;
+    overflow: hidden;
+  }
+  /* The live orb is a WebGL canvas (see the orb script); the gradient above
+     is only what shows when WebGL is unavailable. */
+  .orb canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .orb.gl { background: none; animation: none; }
+  .orb.gl::after { display: none; }
+  .orb::after {
     content: '';
     position: absolute;
-    inset: -6px;
-    border-radius: 50%;
-    border: 2px solid rgba(30,77,140,0.35);
-    animation: pulse-ring 2.4s ease-out infinite;
+    inset: 0;
+    border-radius: inherit;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    opacity: 0.32;
+    mix-blend-mode: overlay;
+    pointer-events: none;
   }
-
-  @keyframes pulse-ring {
-    0%   { transform: scale(0.9); opacity: 0.8; }
-    80%  { transform: scale(1.25); opacity: 0; }
-    100% { transform: scale(1.25); opacity: 0; }
+  @keyframes orb-drift {
+    0%   { background-position: 0% 0%; }
+    100% { background-position: 100% 100%; }
   }
 
   /* ---------- Widget panel ---------- */
   .widget {
     position: fixed;
-    bottom: 104px;
+    bottom: 100px;
     right: 28px;
-    width: 336px;
-    max-width: calc(100vw - 40px);
-    max-height: calc(100vh - 140px);
+    width: 380px;
+    max-width: calc(100vw - 32px);
+    height: 600px;
+    max-height: calc(100vh - 124px);
     background: var(--white);
-    border-radius: 22px;
+    border-radius: 28px;
+    border: 1px solid rgba(11,30,61,0.06);
     box-shadow: var(--card-shadow);
-    overflow-y: auto;
-    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     z-index: 50;
     opacity: 0;
     transform: translateY(16px) scale(0.98);
+    transform-origin: bottom right;
     pointer-events: none;
     transition: opacity 0.22s ease, transform 0.22s ease;
   }
@@ -160,251 +194,286 @@
     pointer-events: auto;
   }
 
-  .widget-header {
-    background: var(--navy);
-    color: var(--white);
-    padding: 18px 20px;
+  .widget-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    padding: 14px 14px 0;
+    flex-shrink: 0;
   }
 
-  .widget-header .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .brand-mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    background: var(--gold);
+  .round-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: #F1F2F4;
+    color: var(--navy);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Lora', serif;
-    font-weight: 700;
-    color: var(--navy);
-    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s ease;
   }
+  .round-btn:hover { background: #E7E9ED; }
+  .round-btn svg { width: 20px; height: 20px; }
+  .round-btn .icon-voice { display: none; }
+  .widget[data-view="chat"] .round-btn .icon-chat { display: none; }
+  .widget[data-view="chat"] .round-btn .icon-voice { display: block; }
 
-  .widget-header h2 {
+  .widget-title {
     font-family: 'Lora', serif;
     font-size: 17px;
     font-weight: 600;
+    color: var(--navy);
   }
 
-  .collapse-btn {
-    background: none;
+  /* ---------- Views ---------- */
+  .stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .voice-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    padding: 0 28px;
+    text-align: center;
+  }
+  .widget[data-view="chat"] .voice-view { display: none; }
+
+  .voice-orb {
+    width: 200px;
+    height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 18px 40px rgba(30,77,140,0.18);
+  }
+
+  .talk-btn {
+    position: relative;
+    z-index: 1;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
     border: none;
+    background: var(--white);
+    color: var(--navy);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    padding: 4px;
-    opacity: 0.75;
+    box-shadow: 0 6px 18px rgba(11,30,61,0.18);
+    transition: transform 0.2s ease, opacity 0.2s ease;
   }
-  .collapse-btn:hover { opacity: 1; }
-  .collapse-btn svg { width: 16px; height: 16px; stroke: var(--white); }
-
-  .widget-body {
-    padding: 20px;
+  .talk-btn:hover { transform: scale(1.06); }
+  .talk-btn svg { width: 24px; height: 24px; fill: currentColor; }
+  .talk-btn span {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
   }
 
-  .widget-body .prompt {
-    font-size: 13.5px;
+  .voice-hint {
+    font-size: 15px;
+    line-height: 1.55;
     color: var(--slate);
-    margin-bottom: 16px;
+    max-width: 260px;
   }
 
+  /* In a call: the orb takes over, the call button swaps to End */
+  .widget:not([data-call="idle"]) .talk-btn { opacity: 0; pointer-events: none; }
+  .widget:not([data-call="idle"]) .voice-hint { display: none; }
+  .widget:not([data-call="idle"]) .voice-orb:not(.gl) { animation: orb-drift 5s ease-in-out infinite alternate; }
+  .widget.speaking .voice-orb:not(.gl) { animation: orb-drift 3s ease-in-out infinite alternate; }
+
+  .chat-view {
+    flex: 1;
+    min-height: 0;
+    display: none;
+    flex-direction: column;
+    padding: 12px 18px 0;
+  }
+  .widget[data-view="chat"] .chat-view { display: flex; }
+
+  .chat-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+  .chat-log:empty { display: none; }
+  .chat-log:not(:empty) + .chat-empty { display: none; }
+  .chat-empty {
+    margin: auto;
+    text-align: center;
+    font-size: 14px;
+    color: var(--slate);
+    max-width: 240px;
+    line-height: 1.5;
+  }
+
+  .chat-bubble {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .chat-bubble.user {
+    align-self: flex-end;
+    background: var(--navy);
+    color: var(--white);
+    border-bottom-right-radius: 5px;
+  }
+  .chat-bubble.assistant {
+    align-self: flex-start;
+    background: #F1F2F4;
+    color: var(--navy);
+    border-bottom-left-radius: 5px;
+  }
+
+  .status-line {
+    text-align: center;
+    font-size: 14px;
+    color: var(--slate);
+    min-height: 20px;
+    padding: 4px 20px 0;
+    flex-shrink: 0;
+  }
+
+  /* ---------- Topic avatars (glow tracks the conversation topic) ---------- */
   .topic-grid {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+    justify-content: center;
+    gap: 14px;
+    padding: 10px 20px 12px;
+    flex-shrink: 0;
   }
 
   .topic-card {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-    padding: 6px 6px 10px;
-    border-radius: 14px;
-    background: var(--off-white);
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-    flex: 0 0 calc(50% - 5px);
-    width: calc(50% - 5px);
-    overflow: hidden;
-  }
-
-  .topic-card:hover {
-    border-color: var(--royal);
-    background: #EEF3FA;
-  }
-
-  .topic-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
   }
-
-  .topic-icon svg { width: 20px; height: 20px; }
+  .topic-card span { font-size: 11px; font-weight: 500; color: var(--slate); }
+  .topic-card:hover span { color: var(--navy); }
 
   .topic-avatar {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    border-radius: 10px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
     object-fit: cover;
     object-position: top center;
     border: 2px solid transparent;
-    margin-bottom: 8px;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   }
+  .topic-card:hover .topic-avatar { transform: translateY(-1px); }
 
-  /* Set on the tile matching whichever category the last reply was about
-     (topic-card click, or keyword match against the reply text — see
-     classifyCategory/setActiveTopic in the script below). A steady gold
-     ring, distinct from the animated "speaking" glow below. */
+  /* Steady gold ring: the topic the last reply was about. */
   .topic-card.active .topic-avatar {
     border-color: var(--gold);
-    box-shadow: 0 0 0 4px rgba(217, 164, 65, 0.22);
+    box-shadow: 0 0 0 3px rgba(217, 164, 65, 0.22);
   }
 
-  /* Set only while audio is actively playing for the active tile (voice
-     path) or briefly after a typed reply lands — an animated pulse so the
-     "who's talking" cue reads as live, not just a static highlight. */
+  /* Animated pulse while that topic's reply is being spoken. */
   .topic-card.speaking .topic-avatar {
     border-color: var(--royal);
     animation: act-avatar-pulse 1.1s ease-in-out infinite;
   }
 
   @keyframes act-avatar-pulse {
-    0%, 100% { box-shadow: 0 0 0 4px rgba(30, 77, 140, 0.20), 0 0 8px rgba(30, 77, 140, 0.25); }
-    50% { box-shadow: 0 0 0 7px rgba(30, 77, 140, 0.32), 0 0 20px rgba(30, 77, 140, 0.55); }
+    0%, 100% { box-shadow: 0 0 0 3px rgba(30, 77, 140, 0.20), 0 0 6px rgba(30, 77, 140, 0.25); }
+    50% { box-shadow: 0 0 0 5px rgba(30, 77, 140, 0.32), 0 0 16px rgba(30, 77, 140, 0.55); }
   }
 
-  .topic-card span {
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--navy);
-    text-align: center;
-  }
-
-  .talk-btn {
-    margin-top: 18px;
-    width: 100%;
-    padding: 14px;
-    border: none;
-    border-radius: 14px;
-    background: linear-gradient(120deg, var(--royal), var(--navy));
-    color: var(--white);
-    font-family: 'Inter', sans-serif;
-    font-size: 15px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-  }
-
-  .talk-btn:hover { opacity: 0.92; }
-  .talk-btn svg { width: 18px; height: 18px; fill: var(--white); }
-
-  .status-line {
-    margin-top: 12px;
-    text-align: center;
-    font-size: 12px;
-    color: var(--slate);
-    min-height: 16px;
-  }
-
-  .divider {
+  /* ---------- Input bar ---------- */
+  .input-bar {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 16px 0 12px;
-    color: var(--slate);
-    font-size: 12px;
-  }
-  .divider::before, .divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #E5E8EE;
-  }
-
-  .chat-log {
-    max-height: 140px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-  .chat-log:empty { display: none; }
-
-  .chat-bubble {
-    max-width: 85%;
-    padding: 9px 13px;
-    border-radius: 12px;
-    font-size: 13px;
-    line-height: 1.4;
-  }
-  .chat-bubble.user {
-    align-self: flex-end;
-    background: var(--royal);
-    color: var(--white);
-    border-bottom-right-radius: 4px;
-  }
-  .chat-bubble.assistant {
-    align-self: flex-start;
-    background: var(--off-white);
-    color: var(--navy);
-    border-bottom-left-radius: 4px;
+    padding: 0 16px 16px;
+    flex-shrink: 0;
   }
 
   .chat-row {
+    flex: 1;
+    min-width: 0;
     display: flex;
-    gap: 8px;
+    align-items: center;
+    border: 1px solid #E3E6EB;
+    border-radius: 999px;
+    padding: 0 6px 0 20px;
+    height: 56px;
+    background: var(--white);
+    transition: border-color 0.15s ease;
   }
+  .chat-row:focus-within { border-color: var(--royal); }
 
   .chat-row input {
     flex: 1;
-    border: 1px solid #E5E8EE;
-    border-radius: 12px;
-    padding: 11px 14px;
+    min-width: 0;
+    border: none;
+    background: none;
     font-family: 'Inter', sans-serif;
-    font-size: 13.5px;
+    font-size: 15px;
     color: var(--navy);
     outline: none;
-    transition: border-color 0.15s ease;
   }
-  .chat-row input:focus { border-color: var(--royal); }
+  .chat-row input::placeholder { color: #8A919D; }
 
   .send-btn {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
     border: none;
-    background: var(--navy);
-    color: var(--white);
+    background: none;
+    color: #8A919D;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     flex-shrink: 0;
+    transition: color 0.15s ease;
   }
-  .send-btn svg { width: 17px; height: 17px; }
-  .send-btn:hover { background: var(--royal); }
+  .send-btn svg { width: 20px; height: 20px; }
+  .send-btn:hover { color: var(--navy); }
   .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  .end-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: #111;
+    color: var(--white);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .end-btn svg { width: 22px; height: 22px; fill: currentColor; transform: rotate(135deg); }
+  .end-btn:hover { background: #000; }
+  .widget:not([data-call="idle"]) .end-btn { display: flex; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .orb, .voice-orb { animation: none !important; }
+  }
+
   @media (max-width: 420px) {
-    .widget { right: 16px; bottom: 96px; }
+    .widget { right: 16px; bottom: 92px; }
     .launcher { right: 16px; }
   }
 </style>
@@ -421,77 +490,79 @@
     </div>
   </section>
 
-  <!-- Floating launcher button -->
-  <button class="launcher" id="launcherBtn" aria-label="Open Agni AI">
-    <svg viewBox="0 0 24 24"><path d="M12 3C7.03 3 3 6.58 3 11c0 2.39 1.19 4.53 3.06 6.02-.1.98-.5 2.28-1.5 3.48 1.7-.16 3.24-.86 4.4-1.72.94.25 1.95.39 3.04.39 4.97 0 9-3.58 9-8s-4.03-8-9-8z"/></svg>
+  <!-- Floating launcher: pill with orb -->
+  <button class="launcher" id="launcherBtn" aria-label="Open Agni AI voice chat">
+    <span class="orb" aria-hidden="true"></span>
+    <span>Voice chat</span>
   </button>
 
   <!-- Widget panel -->
-  <div class="widget" id="widgetPanel">
-    <div class="widget-header">
-      <div class="brand">
-        <div class="brand-mark">A</div>
-        <h2>Agni AI</h2>
+  <div class="widget" id="widgetPanel" data-view="voice" data-call="idle" role="dialog" aria-label="Agni AI">
+    <div class="widget-top">
+      <button class="round-btn" id="viewToggleBtn" aria-label="Switch between voice and text chat">
+        <svg class="icon-chat" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 3.5V15H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm14 4h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2v3l-3.5-3H11a2 2 0 0 1-1.7-1H15a4 4 0 0 0 3-1.3V8z"/></svg>
+        <svg class="icon-voice" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+      </button>
+      <span class="widget-title">Agni AI</span>
+      <button class="round-btn" id="collapseBtn" aria-label="Collapse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+          <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="stage">
+      <div class="voice-view">
+        <div class="orb voice-orb">
+          <button class="talk-btn" id="talkBtn" aria-label="Start voice call">
+            <svg viewBox="0 0 24 24"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02l-2.2 2.2z"/></svg>
+            <span id="talkBtnLabel">Let's Talk</span>
+          </button>
+        </div>
+        <p class="voice-hint" id="promptLabel">Ask about admissions, courses, placements or campus life.</p>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <button class="collapse-btn" id="collapseBtn" aria-label="Collapse">
-          <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
-            <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
-          </svg>
-        </button>
+
+      <div class="chat-view">
+        <div class="chat-log" id="chatLog"></div>
+        <p class="chat-empty">Type a question below, or pick a topic to get started.</p>
       </div>
     </div>
 
-    <div class="widget-body">
-      <div class="prompt" id="promptLabel">What would you like to know?</div>
+    <div class="status-line" id="statusLine" aria-live="polite"></div>
 
-      <div class="topic-grid">
-        <div class="topic-card"
-             data-avatar="about-us"
-             data-topic-en="Tell me about Agni — what makes it a good college?">
-          <img class="topic-avatar" src="assets/about-us-idle.png" alt="About Us">
-          <span>About Us</span>
-        </div>
-
-        <div class="topic-card"
-             data-avatar="courses"
-             data-topic-en="What courses does Agni offer?">
-          <img class="topic-avatar" src="assets/courses-idle.png" alt="Courses">
-          <span>Courses</span>
-        </div>
-
-        <div class="topic-card"
-             data-avatar="admissions"
-             data-topic-en="How do I get admission into Agni?">
-          <img class="topic-avatar" src="assets/admissions-idle.png" alt="Admissions">
-          <span>Admissions</span>
-        </div>
-
-        <div class="topic-card"
-             data-avatar="placements"
-             data-topic-en="Tell me about placements at Agni.">
-          <img class="topic-avatar" src="assets/placements-idle.png" alt="Placements">
-          <span>Placements</span>
-        </div>
+    <div class="topic-grid">
+      <div class="topic-card" data-avatar="about-us" title="About Us"
+           data-topic-en="Tell me about Agni — what makes it a good college?">
+        <img class="topic-avatar" src="assets/about-us-idle.png" alt="About Us">
+        <span>About</span>
       </div>
+      <div class="topic-card" data-avatar="courses" title="Courses"
+           data-topic-en="What courses does Agni offer?">
+        <img class="topic-avatar" src="assets/courses-idle.png" alt="Courses">
+        <span>Courses</span>
+      </div>
+      <div class="topic-card" data-avatar="admissions" title="Admissions"
+           data-topic-en="How do I get admission into Agni?">
+        <img class="topic-avatar" src="assets/admissions-idle.png" alt="Admissions">
+        <span>Admissions</span>
+      </div>
+      <div class="topic-card" data-avatar="placements" title="Placements"
+           data-topic-en="Tell me about placements at Agni.">
+        <img class="topic-avatar" src="assets/placements-idle.png" alt="Placements">
+        <span>Placements</span>
+      </div>
+    </div>
 
-      <button class="talk-btn" id="talkBtn">
-        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
-        <span id="talkBtnLabel">Let's Talk</span>
-      </button>
-
-      <div class="divider" id="dividerLabel"><span>or type your question</span></div>
-
-      <div class="chat-log" id="chatLog"></div>
-
+    <div class="input-bar">
       <form class="chat-row" id="chatForm">
-        <input type="text" id="chatInput" placeholder="Ask about admissions, courses..." autocomplete="off">
+        <input type="text" id="chatInput" placeholder="Or send a message..." autocomplete="off" aria-label="Type your question">
         <button type="submit" class="send-btn" id="sendBtn" aria-label="Send">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.5 20.5 22 12 2.5 3.5l.01 6.6L16 12 2.51 13.9z"/></svg>
         </button>
       </form>
-
-      <div class="status-line" id="statusLine"></div>
+      <button class="end-btn" id="endBtn" aria-label="End call">
+        <svg viewBox="0 0 24 24"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02l-2.2 2.2z"/></svg>
+      </button>
     </div>
   </div>
 
@@ -566,6 +637,7 @@
   }
 
   function setSpeakingTopic(isSpeaking) {
+    widgetPanel.classList.toggle('speaking', isSpeaking);
     topicCards.forEach(card => {
       card.classList.toggle('speaking', isSpeaking && card.classList.contains('active'));
     });
@@ -590,6 +662,14 @@
 
   launcherBtn.addEventListener('click', openWidget);
   collapseBtn.addEventListener('click', closeWidget);
+
+  // Two views share the panel: the orb (voice) and the typed transcript.
+  const viewToggleBtn = document.getElementById('viewToggleBtn');
+  const endBtn = document.getElementById('endBtn');
+  function setView(view) { widgetPanel.dataset.view = view; }
+  viewToggleBtn.addEventListener('click', () => {
+    setView(widgetPanel.dataset.view === 'chat' ? 'voice' : 'chat');
+  });
 
   // This posts to the RAG backend's public /widget/chat proxy (see
   // rag-backend/main.py) — NOT /v1/chat/completions directly, since that
@@ -639,6 +719,7 @@
 
   async function sendMessage(message) {
     if (!message) return;
+    if (!voiceActive) setView('chat'); // typed replies show in the transcript view
 
     // The widget's own wording stays English whatever language the visitor
     // types in (2026-10-08, at Prakash's request) — the backend still
@@ -730,6 +811,8 @@
   let micStream = null;
   let micAudioCtx = null;
   let micSource = null;
+  let playbackAnalyser = null;
+  let micAnalyser = null;
   let micDetachCapture = null;
   let playbackCtx = null;
   let playbackSampleRate = 24000;
@@ -805,7 +888,7 @@
 
       const source = playbackCtx.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(playbackCtx.destination);
+      source.connect(playbackAnalyser || playbackCtx.destination);
       source.onended = () => {
         const idx = scheduledSources.indexOf(source);
         if (idx !== -1) scheduledSources.splice(idx, 1);
@@ -849,6 +932,11 @@
   function setTalkButtonState(label) {
     const label_el = talkBtn.querySelector('span');
     if (label_el) label_el.textContent = label;
+    // Drives the panel styling: idle = call button on the orb,
+    // connecting / live = orb animates and the End button appears.
+    widgetPanel.dataset.call =
+      label === UI_TEXT.connecting ? 'connecting' :
+      label === UI_TEXT.endCall ? 'live' : 'idle';
   }
 
   // Mic capture. An AudioWorklet posts ~20ms blocks straight off the audio
@@ -998,6 +1086,10 @@
     playbackSampleRate = 24000;
     playbackCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: playbackSampleRate });
     nextPlayTime = playbackCtx.currentTime;
+    // Reply audio passes through this analyser so the orb can move with it.
+    playbackAnalyser = playbackCtx.createAnalyser();
+    playbackAnalyser.fftSize = 256;
+    playbackAnalyser.connect(playbackCtx.destination);
     console.debug(`Agni AI: playbackCtx created, initial state="${playbackCtx.state}"`);
     playbackCtx.resume().then(
       () => console.debug(`Agni AI: playbackCtx.resume() resolved, state="${playbackCtx.state}"`),
@@ -1095,6 +1187,10 @@
 
       micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       micSource = micAudioCtx.createMediaStreamSource(micStream);
+      // Read-only tap for the orb's reaction to the visitor's voice.
+      micAnalyser = micAudioCtx.createAnalyser();
+      micAnalyser.fftSize = 256;
+      micSource.connect(micAnalyser);
       const captureCtx = micAudioCtx;
       attachMicCapture(captureCtx, micSource, (input) => {
         if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) return;
@@ -1182,6 +1278,8 @@
 
   function stopVoiceSession() {
     voiceActive = false;
+    playbackAnalyser = null;
+    micAnalyser = null;
     if (playbackKeepAliveInterval) { clearInterval(playbackKeepAliveInterval); playbackKeepAliveInterval = null; }
     if (micDetachCapture) { micDetachCapture(); micDetachCapture = null; }
     if (micSource) { micSource.disconnect(); micSource = null; }
@@ -1197,13 +1295,223 @@
     statusLine.textContent = '';
   }
 
-  talkBtn.addEventListener('click', () => {
+  function toggleVoiceSession() {
     if (voiceActive) {
       stopVoiceSession();
     } else {
+      setView('voice');
       startVoiceSession();
     }
-  });
+  }
+  talkBtn.addEventListener('click', toggleVoiceSession);
+  endBtn.addEventListener('click', toggleVoiceSession);
+
+  // ---------------------------------------------------------------------
+  // The orb — a small WebGL shader drawn into every .orb element: two slow
+  // colour bands drifting across the disc, a glossy ripple ring that pulses
+  // in with the audio level, and film grain. It is calm while idle and moves
+  // with Agni AI's voice (playbackAnalyser) and the visitor's (micAnalyser)
+  // during a call. If WebGL isn't available the CSS gradient on .orb stays.
+  // ---------------------------------------------------------------------
+  (function initOrbs() {
+    const VERT = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+    const FRAG = `
+      precision highp float;
+      uniform vec2 uRes;
+      uniform float uTime;   // wall-clock seconds: slow drift
+      uniform float uAnim;   // advances faster while there is audio
+      uniform float uLevel;  // smoothed audio level, 0..1
+      const float PI = 3.14159265359;
+
+      float hash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+      }
+      float vnoise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+      }
+      float perlin(vec2 p) { return vnoise(p) * 0.65 + vnoise(p * 2.03 + vec2(17.3, 9.1)) * 0.35; }
+
+      void main() {
+        float s = min(uRes.x, uRes.y);
+        vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / s;
+        float r = length(uv);
+        float alpha = 1.0 - smoothstep(1.0 - 3.0 / s, 1.0, r);
+
+        // --- Ripple: exists only while there is audio. A ring swells in
+        // from the rim as the level rises and falls back as it drops, with
+        // a fainter second ring behind it. Each ring bends the bands under
+        // it like a lens; with no audio (amp = 0) none of this is visible.
+        float amp = smoothstep(0.03, 0.30, uLevel);
+        vec2 rc = 0.16 * vec2(sin(uTime * 0.7), cos(uTime * 0.53));
+        vec2 dv = (uv - rc) * vec2(1.0, 1.0 + 0.25 * sin(uTime * 0.9));
+        float d = length(dv);
+        vec2 dir = dv / (d + 0.001);
+        float R = 1.05 - 0.70 * uLevel;
+        float q1 = (d - R) / 0.075;
+        float q2 = (d - R - 0.30) / 0.10;
+        float bump = exp(-q1 * q1) + 0.45 * exp(-q2 * q2);
+        float inside = 1.0 - smoothstep(R - 0.08, R, d);
+        vec2 buv = uv - dir * bump * 0.16 * amp - dv * inside * 0.12 * amp;
+
+        // --- Bands: soft wedges fanning out from a slowly wandering point,
+        // bent by a flow field that speeds up with the voice.
+        // The fan's origin sits outside the disc (and circles it slowly), so
+        // inside the disc the wedges read as broad diagonal stripes.
+        float oa = 3.5 + 0.5 * sin(uTime * 0.06);
+        vec2 w = buv - 1.5 * vec2(cos(oa), sin(oa));
+        float wr = length(w);
+        // Angle measured from the line origin -> disc centre, in -PI..PI.
+        float wth = mod(atan(w.y, w.x) - oa + 2.0 * PI, 2.0 * PI) - PI;
+        float fx = wr * 0.9 - uAnim * 0.25;
+        float flow = perlin(vec2(fx, wth * 2.2 + 3.0)) - 0.5;
+        wth += flow * mix(0.35, 0.55, uLevel);
+
+        float lum = 0.80;
+        for (int i = 0; i < 7; i++) {
+          float fi = float(i);
+          float c = (fi - 3.0) * 0.36 + 0.22 * sin(uTime / 5.0 + fi * 1.7);
+          float n = perlin(vec2(fi * 3.1, uTime * 0.08 + fi));
+          float a = 0.36 + n * 0.20;
+          float b = 1.3 + n * 1.9;
+          float dth = abs(wth - c);
+          float oval = (dth * dth) / (a * a) + (wr * wr) / (b * b);
+          float edge = smoothstep(1.0, 0.2, oval);
+          // Dark through the middle of the fan, lighter toward its sides.
+          float g = 0.18 + 0.6 * smoothstep(0.15, 1.0, abs(fi - 3.2) / 3.0) + (n - 0.5) * 0.25;
+          lum = mix(lum, g, 0.92 * edge);
+        }
+
+        // --- Colour
+        vec3 deep   = vec3(0.19, 0.48, 0.50);
+        vec3 mid    = vec3(0.44, 0.74, 0.80);
+        vec3 sky    = vec3(0.56, 0.84, 0.96);
+        vec3 pale   = vec3(0.84, 1.00, 1.00);
+        vec3 cyan   = vec3(0.17, 0.66, 0.90);
+        vec3 yellow = vec3(0.93, 0.89, 0.47);
+
+        vec3 col = lum < 0.62 ? mix(deep, mid, clamp((lum - 0.30) / 0.32, 0.0, 1.0))
+                 : lum < 0.80 ? mix(mid, sky, (lum - 0.62) / 0.18)
+                 : mix(sky, pale, clamp((lum - 0.80) / 0.20, 0.0, 1.0));
+
+        // One yellow wedge on the upper-left; over a dark band it reads olive.
+        float dy = wth - (0.42 + 0.14 * sin(uTime * 0.08));
+        float yv = smoothstep(1.0, 0.0, (dy * dy) / 0.09 + (wr - 1.15) * (wr - 1.15) / 1.1);
+        float darkness = 1.0 - smoothstep(0.30, 0.80, lum);
+        col = mix(col, yellow, yv * mix(0.95, 0.55, darkness));
+
+        // Light the ripple from the lower left: glossy on that side of the
+        // ring, slightly shaded on the far side.
+        float shade = dot(dir, normalize(vec2(-0.75, -0.65)));
+        col = mix(col, pale, bump * amp * (0.15 + 0.80 * max(shade, 0.0)));
+        col *= 1.0 - 0.22 * bump * amp * max(-shade, 0.0);
+        col = mix(col, sky, inside * amp * 0.10);
+
+        col = mix(col, cyan, smoothstep(0.82, 1.0, r) * smoothstep(-0.9, 0.9, -uv.y) * 0.45);
+        col += (hash(gl_FragCoord.xy + floor(uTime * 20.0) * 7.31) - 0.5) * 0.11;
+        gl_FragColor = vec4(clamp(col, 0.0, 1.0) * alpha, alpha);
+      }
+`;
+
+    function createOrb(el, seed) {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
+      if (!gl) return null;
+      const compile = (type, src) => {
+        const sh = gl.createShader(type);
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+        return sh;
+      };
+      try {
+        const prog = gl.createProgram();
+        gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+        gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+        gl.useProgram(prog);
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+        const loc = gl.getAttribLocation(prog, 'p');
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+        el.prepend(canvas);
+        el.classList.add('gl');
+        return {
+          el, canvas, gl, seed, drawn: false,
+          uRes: gl.getUniformLocation(prog, 'uRes'),
+          uTime: gl.getUniformLocation(prog, 'uTime'),
+          uAnim: gl.getUniformLocation(prog, 'uAnim'),
+          uLevel: gl.getUniformLocation(prog, 'uLevel'),
+        };
+      } catch (err) {
+        console.warn('Agni AI: orb shader unavailable, keeping the CSS orb:', err);
+        return null;
+      }
+    }
+
+    const launcherOrb = createOrb(launcherBtn.querySelector('.orb'), 40);
+    const voiceOrb = createOrb(widgetPanel.querySelector('.voice-orb'), 0);
+    if (!launcherOrb && !voiceOrb) return;
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const levelBuf = new Uint8Array(256);
+    function readLevel(analyser) {
+      if (!analyser) return 0;
+      analyser.getByteTimeDomainData(levelBuf);
+      let sum = 0;
+      for (let i = 0; i < levelBuf.length; i++) { const v = (levelBuf[i] - 128) / 128; sum += v * v; }
+      return Math.min(1, Math.sqrt(sum / levelBuf.length) * 3.5);
+    }
+
+    function draw(orb, time, anim, level) {
+      const size = Math.round(orb.el.clientWidth * Math.min(window.devicePixelRatio || 1, 2));
+      if (!size) return;
+      if (orb.canvas.width !== size) {
+        orb.canvas.width = orb.canvas.height = size;
+        orb.gl.viewport(0, 0, size, size);
+        orb.drawn = false;
+      }
+      if (reduceMotion && orb.drawn) return;
+      orb.gl.uniform2f(orb.uRes, size, size);
+      orb.gl.uniform1f(orb.uTime, time + orb.seed);
+      orb.gl.uniform1f(orb.uAnim, anim + orb.seed);
+      orb.gl.uniform1f(orb.uLevel, level);
+      orb.gl.drawArrays(orb.gl.TRIANGLES, 0, 3);
+      orb.drawn = true;
+    }
+
+    let flowTime = 0;
+    let clock = 0;
+    let level = 0;
+    let last = performance.now();
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const open = widgetPanel.classList.contains('open');
+
+      let target = 0;
+      if (open && !reduceMotion) {
+        target = Math.max(readLevel(playbackAnalyser), readLevel(micAnalyser) * 0.7);
+        // No audio to follow: a typed reply's brief "speaking" pulse, or a
+        // call that is still connecting.
+        if (!voiceActive && widgetPanel.classList.contains('speaking')) target = 0.75 * Math.abs(Math.sin(now / 170)) * Math.abs(Math.sin(now / 640));
+      }
+      if (target < 0.04) target = 0; // background hiss must not ripple
+      level += (target - level) * (target > level ? 0.5 : 0.08);
+      if (!reduceMotion) { clock += dt; flowTime += dt * (0.25 + 1.5 * level); }
+
+      if (voiceOrb && open && widgetPanel.dataset.view === 'voice') draw(voiceOrb, clock, flowTime, level);
+      if (launcherOrb && !open) draw(launcherOrb, clock, flowTime, 0);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
 </script>
 
 </body>

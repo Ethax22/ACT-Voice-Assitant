@@ -4,6 +4,12 @@
 naturalness work (`docs/Voice_Naturalness_Plan.md`) over to the two phone
 agents on Sarvam Indus.
 
+> **Superseded 2026-10-09 by the dashboard-checked versions:**
+> `Calling_Agent_Inbound_Indus_Changes.md` and
+> `Calling_Agent_Outbound_Indus_Changes.md` use the real Indus setting names
+> and the three reply styles (English / Tamil / Tanglish, no "bro"/"anna").
+> Where they differ from this file, they win. Not yet applied in Indus.
+
 The phone agents are configured in the Indus dashboard, not in this repo. So
 this is mostly paste-ready text and a settings checklist for Prakash to apply
 there. It was written from this repo's planning docs — the live Indus

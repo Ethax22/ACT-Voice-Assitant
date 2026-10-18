@@ -42,6 +42,7 @@ from retriever import retriever
 from leads import normalize_indian_mobile, save_lead
 from conversation_logger import log_turn, prune_old_logs
 from conversation_state import derive_state, lead_already_captured, mark_lead_captured
+from sentiment_report import run_periodically as run_sentiment_reports
 
 app = FastAPI(title="Agni AI RAG Backend")
 logger = logging.getLogger("rag_backend")
@@ -54,6 +55,23 @@ async def _prune_logs_on_startup():
     a running scheduler, since this only needs to happen about once a day
     and the backend restarts at least that often in practice."""
     prune_old_logs()
+
+
+# Hours between automatic sentiment reports (rag-backend/reports/); 0 turns
+# them off, leaving `python sentiment_report.py` by hand as the only way.
+SENTIMENT_REPORT_INTERVAL_HOURS = float(os.environ.get("SENTIMENT_REPORT_INTERVAL_HOURS", "24"))
+_sentiment_report_task = None
+
+
+@app.on_event("startup")
+async def _start_sentiment_reports():
+    """Runs in the background, after the fact, from saved transcripts — it is
+    never in the path of a visitor's reply."""
+    global _sentiment_report_task
+    if SENTIMENT_REPORT_INTERVAL_HOURS > 0:
+        _sentiment_report_task = asyncio.create_task(
+            run_sentiment_reports(SENTIMENT_REPORT_INTERVAL_HOURS)
+        )
 
 
 @app.on_event("startup")
@@ -432,7 +450,8 @@ Tamil style - you are replying in spoken Chennai Tamil:
   விண்ணப்பம்). English verbs get Tamil endings: "apply பண்ணுங்க",
   "contact பண்ணலாம்".
 - Never crude or over-familiar words: no "ஆம்பளை", "பொம்பளை", "பசங்க",
-  "பொண்ணுங்க". Say "மாணவர்கள்" and "மாணவிகள்" in Tamil script.
+  "பொண்ணுங்க". Say "மாணவர்கள்" and "மாணவிகள்" in Tamil script. Never "bro",
+  "anna", "da" or "machi" either, even when the visitor says them.
 - The campus is at Thalambur (தாழம்பூர்), never Tambaram (தாம்பரம்), a different place.
 - Say numbers and amounts the way they are spoken in Tamil."""
 
@@ -441,8 +460,8 @@ TANGLISH_STYLE = """
 Tanglish style - the visitor is mixing Tamil and English in English letters:
 - Reply in the same mix, in English letters. Short, spoken, friendly - the way a
   helpful senior student answers a junior, not the way a form is worded.
-- Use "bro" or "anna" only if the visitor did; otherwise stay polite
-  ("neenga", "unga").
+- Never say "bro", "anna", "da" or "machi", even when the visitor does
+  (Prakash, 2026-10-13). Stay polite: "neenga", "unga".
 - Keep English words English and attach Tamil endings to them: "Application
   online-la pannalaam", "documents upload pannunga", "branch-ku branch maarum".
 - Ask one short follow-up question when it moves things along.
@@ -451,11 +470,11 @@ Tanglish style - the visitor is mixing Tamil and English in English letters:
 
 Examples of the tone (the facts must still come from the context):
 Visitor: "Bro B.Tech fees evlo?"
-You: "B.Tech fees branch-ku branch maarum bro. Entha branch paakureenga?"
+You: "B.Tech fees branch-ku branch maarum. Neenga entha branch paakureenga?"
 Visitor: "Anna application epdi panrathu?"
 You: "Application online-la pannalaam. Website-la details fill pannitu documents upload pannunga."
 Visitor: "Hostel iruka?"
-You: "Yes bro, hostel facility irukku. Boys-aa girls-aa?"
+You: "Yes, hostel facility irukku. Boys-aa girls-aa?"
 """
 
 # Which extra style block each reply style gets.
@@ -698,8 +717,26 @@ async def _english_search_query(query: str) -> str:
     return english
 
 
+# The phone agent is a front desk, not a senior student: no "bro"/"anna" even
+# when the caller uses them (Prakash, 2026-10-09). Since 2026-10-13 the same rule
+# applies to the website bot (TANGLISH_STYLE / TAMIL_STYLE); kept as a reminder.
+PHONE_TANGLISH_NO_BRO = (
+    "\nThis is a phone call: never say \"bro\" or \"anna\", even if the caller does. "
+    "Say \"neenga / unga\" and stay polite."
+)
+
+
+# Repeated in the final system message because that is the one the model obeys:
+# with the rule only in the style block, 2 of 16 test replies still said "bro".
+NO_BRO_FINAL = (
+    " Do not use the words \"bro\", \"anna\", \"da\" or \"machi\" anywhere in this reply, "
+    "even though the visitor did."
+)
+
+
 async def _build_full_messages(
-    messages: list[dict], voice: bool = False, session_id: str | None = None
+    messages: list[dict], voice: bool = False, session_id: str | None = None,
+    phone: bool = False,
 ) -> list[dict]:
     """Shared brain: retrieve context for the latest turn and prepend the
     Agni AI persona + that context to the FULL conversation history, so
@@ -762,6 +799,7 @@ async def _build_full_messages(
             + (VOICE_BREVITY_ADDENDUM if voice else "")
             + (BACKCHANNEL_ADDENDUM if kind == "ack" else "")
             + STYLE_BLOCKS.get(language, "")
+            + (PHONE_TANGLISH_NO_BRO if phone and language == "ta_en" else "")
             + derive_state(messages, session_id).prompt_block(),
         },
         *messages,  # preserves every prior user/assistant turn
@@ -772,6 +810,7 @@ async def _build_full_messages(
                 else VOICE_FINAL_REMINDER + " " if voice else ""
             )
             + LANGUAGE_RULES[language]
+            + (NO_BRO_FINAL if language in ("ta", "ta_en") else "")
             + (ACK_FINAL if kind == "ack" else "")
             + ("" if kind == "closing" else FACTS_RULE + _already_said_rule(messages)),
         },
@@ -795,7 +834,8 @@ async def _generate_reply(
     actual reply before returning — the caller never sees a tool_calls
     finish_reason, only a normal assistant message."""
     full_messages = await _build_full_messages(
-        messages, voice=(source in _SPOKEN_SOURCES), session_id=session_id
+        messages, voice=(source in _SPOKEN_SOURCES), session_id=session_id,
+        phone=(source == "phone"),
     )
     response = await chat_client.chat.completions.create(
         model=CHAT_MODEL,
@@ -981,8 +1021,8 @@ async def widget_chat(payload: WidgetChatRequest):
 
 class CallingAgentAskRequest(BaseModel):
     question: str
-    # Optional: the caller's language ("en" or "ta"), if the Indus tool is set
-    # up to send it. Without it the reply language follows the script of the
+    # Optional: the caller's reply style ("en", "ta" or "ta_en" for Tanglish),
+    # if the Indus tool is set up to send it. Without it the style follows the script of the
     # question, which is wrong when Indus passes a Tamil caller's question in
     # English.
     language: str | None = None
