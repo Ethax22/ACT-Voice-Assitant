@@ -17,9 +17,9 @@ Items marked *unverified* are claims in code comments that were not re-tested wh
    ┌────────────────────┐   ┌──────────────────────────────────────┐
    │ rag-backend :8000  │◄──┤ voice-pipeline :8001  (Pipecat)      │
    │ FastAPI            │   │ Sarvam STT → router → LLM step →     │
-   │ /v1/chat/completions   │ Sarvam TTS (stock or cloned voice)   │
+   │ /v1/chat/completions   │ Cartesia TTS (Sonic 3.6)             │
    └─────────┬──────────┘   └──────────────────────────────────────┘
-   Sarvam 105B (chat) · Azure OpenAI (embeddings only) · Google Sheets (leads, knowledge) · local disk (logs)
+   Sarvam 105B (chat) · Sarvam Saaras (listening) · Cartesia (speaking) · Azure OpenAI (embeddings only) · Google Sheets (leads, knowledge) · local disk (logs)
 ```
 
 One brain: typed chat, English voice, Tamil voice and the Calling Agent
@@ -86,7 +86,9 @@ each saved conversation from both log dirs; HTML + CSV in `reports/`; labels not
 
 **Stack:** `pipecat-ai[sarvam,openai,websocket]` (1.12.x per code comments), FastAPI +
 uvicorn, aiohttp, Silero VAD and smart-turn v3 (local). STT `saaras:v4`
-(`SarvamRealtimeSTTService`), TTS `bulbul:v3` (`SarvamTTSService`).
+(`SarvamRealtimeSTTService`). TTS *(since 2026-10-18)* Cartesia `sonic-3.6`
+(`CartesiaTTSService`, already in the installed Pipecat; no extra package). Sarvam
+TTS (`bulbul:v3`, the Sarvam cloned voice) was removed that day.
 
 **Server (`server.py`):** `WS /voice/en`, `WS /voice/ta` (origin-checked; one uuid session
 per socket), `POST /detect-language` (raw PCM16 body), `GET /health`. Startup: prune logs,
@@ -99,7 +101,7 @@ transport.input (FastAPIWebsocket + RawPCMSerializer, 16 kHz in / 24 kHz out)
  → ConversationRouter
  → user aggregator (local VAD + turn strategies)
  → OpenAILLMService (base_url = rag-backend /v1, X-Session-Id header)
- → TTS (ONE service for the whole call: the cloned About Us voice if configured, else the stock About Us voice)
+ → CartesiaTTSService (ONE voice for the whole call: CARTESIA_VOICE_ID)
  → GreetingPlayer → transport.output
  → AudioBufferProcessor → assistant aggregator → TranscriptLogger → LatencyLogger
 ```
@@ -138,28 +140,30 @@ None of these timings is tuned on a real microphone yet.
 (`saaras:v4`, `language_code=unknown`), ~0.6–0.8 s. Realtime STT `auto` was tested and found
 unreliable. Used for the widget's start-of-call snippet and for mid-call detection.
 
-**Voices.** One voice per call (*2026-10-09*): the About Us voice. Default: the Sarvam
-stock voice `ritu`. Cloned: `CLONED_VOICE_ID_ABOUT_US` (cross-lingual, so it speaks every
-style); `CLONED_VOICE_ID_ADMISSIONS|COURSES|PLACEMENTS` are no longer read. By default (`CLONED_VOICE_TRANSPORT=persistent`)
-`PersistentClonedVoiceTTSService` keeps ONE websocket open for the call
-(`wss://api.sarvam.ai/voices/clone/ws`, built on Pipecat's `SarvamTTSService`), so sentences
-of a reply play without gaps. `CLONED_VOICE_TRANSPORT=per_utterance` selects the older
-`ClonedVoiceTTSService`, which opens a websocket per sentence and falls back to the
-non-streaming `POST /voices/clone` if the websocket fails before any audio. Both get the same
-text filter and delivery settings as the stock voice. Cloned voice first
-audio is ~1.3-2.8 s per reply even on the persistent connection (2026-10-09 test, 9 turns):
-Sarvam's per-utterance start-up is not removed by keeping the websocket open. The stock-voice
-buffer default is now `TTS_MIN_BUFFER_SIZE=40` (was 120) so a short first sentence is spoken
-at once; the effect on smoothness is not yet judged by ear.
-`greeting_cache.py` pre-renders each greeting to disk and plays it instantly through
+**Voice (*2026-10-18*).** Cartesia only, one voice for the whole call: `CARTESIA_VOICE_ID`
+(today "Janani - Calm Professional", a Tamil voice from Cartesia's library; a Cartesia clone
+is just another voice id on the same websocket). Model `CARTESIA_MODEL` (default `sonic-3.6`).
+Language follows the reply style: the router sends `en-IN` / `ta-IN` and the service reduces
+them to `en` / `ta`; Tanglish is spoken with `ta` (`TA_EN_TTS_LANGUAGE`). Delivery:
+`CARTESIA_SPEED` (0.6-1.5), `CARTESIA_VOLUME` (0.5-2.0), `CARTESIA_EMOTION`; unset = the
+voice's defaults. Buffering: by default Pipecat sends one sentence at a time with Cartesia's
+own buffer off; `CARTESIA_TEXT_AGGREGATION=token` and `CARTESIA_MAX_BUFFER_DELAY_MS` exist for
+A/B tests. Measured on scripted calls (2026-10-13/18): first audio 0.06-0.20 s after the reply
+text, against 1.4-2.8 s for the old Sarvam cloned voice; end of speech to first audio median
+about 2.1 s, so the 0.7 s target is still missed (turn detection and the answer step). There
+is no backup voice: if Cartesia fails for good mid-call (key, credit, outage) the call has
+no voice; short network blips are retried by the service. Not yet judged by ear.
+`greeting_cache.py` pre-renders each greeting through Cartesia's `/tts/bytes` (keyed by voice,
+model, delivery settings, language and text) and plays it instantly through
 `GreetingPlayer`; falls back to live TTS and renders for the next call.
+`make_cartesia_samples.py` writes a small listening page (`voice_samples/cartesia/`).
 
 **Other:** `speech_text_filter.py` (strips markdown symbols, pronunciation table, applied
 as a TTS text transform), `raw_pcm_serializer.py` (binary PCM in/out; JSON for `topic` and
 `UserStartedSpeaking` on interruption), `conversation_logger.py` (transcript rewritten
 whenever the context grows; one mixed mono `audio.wav`; same layout and 90-day prune),
-`latency_metrics.py` (`[latency]` log lines), `scenario_test.py`, `make_voice_samples.py`,
-`make_clone_samples.py`, `create_cloned_voice.py`.
+`latency_metrics.py` (`[latency]` log lines), `scenario_test.py` (its scripted visitor is
+still voiced by Sarvam TTS; that is test tooling, not the bot), `make_cartesia_samples.py`.
 
 ## 4. widget (`widget/index.html`, single file, vanilla JS)
 
@@ -186,8 +190,10 @@ whenever the context grows; one mixed mono `audio.wav`; same layout and 90-day p
 `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`,
 `WIDGET_ALLOWED_ORIGINS`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `LEADS_SHEET_ID`, optional
 `KNOWLEDGE_SHEET_ID`. `voice-pipeline/.env`: `SARVAM_API_KEY`, `RAG_BACKEND_PUBLIC_URL`,
-`RAG_BACKEND_AUTH_KEY`, optional `CLONED_VOICE_ID_*`, `TTS_PACE`, `TTS_TEMPERATURE`,
-`TTS_MIN_BUFFER_SIZE`, `TTS_MAX_CHUNK_LENGTH`, `TURN_MODE`, `TURN_STOP_TA`,
+`RAG_BACKEND_AUTH_KEY`, `CARTESIA_API_KEY` (the local file spells it `CARTESIAN_API_KEY`;
+both are read), `CARTESIA_VOICE_ID`, optional `CARTESIA_MODEL`, `CARTESIA_SPEED`,
+`CARTESIA_VOLUME`, `CARTESIA_EMOTION`, `CARTESIA_TEXT_AGGREGATION`,
+`CARTESIA_MAX_BUFFER_DELAY_MS`, `TTS_STOP_FRAME_TIMEOUT_SECS`, `TURN_MODE`, `TURN_STOP_TA`,
 `BARGE_IN_SUSTAIN_SECS`, `TURN_SILENCE_TIMEOUT_SECS`, `SMART_TURN_MAX_WAIT_SECS`,
 `STT_SEGMENT_SILENCE_MS`. No Deepgram key and no `AZURE_OPENAI_DEPLOYMENT` remain.
 

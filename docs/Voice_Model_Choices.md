@@ -1,4 +1,16 @@
-# Voice Model Choices (Sarvam, both languages)
+# Voice Model Choices
+
+**Current, 2026-10-18:** listening is Sarvam `saaras:v4` (`SarvamRealtimeSTTService`, both
+languages); speaking is **Cartesia `sonic-3.6`** (`CartesiaTTSService`), one voice per call
+from `CARTESIA_VOICE_ID` (today "Janani - Calm Professional", a Tamil library voice). Sarvam
+`bulbul:v3` and the Sarvam cloned voice were removed from the code that day; there is no
+backup voice. Why: the Cartesia voice starts ~0.1 s after the reply text against 1.4-2.8 s
+for the Sarvam clone, and Prakash's listening found its Tamil and Tanglish good; Cartesia's
+speech-to-text has no Tamil, so listening stayed on Sarvam. Comparison and costs: the
+"Cartesia vs Sarvam for Agni AI" doc (2026-10-09). Settings: `docs/Architecture_Current.md` §3.
+Everything below is the Sarvam-era record, kept for history.
+
+## History: Sarvam, both languages
 
 **Superseded 2026-09-25 — see CLAUDE.md decision #1.** Both languages now run
 on Sarvam (Saaras STT + Bulbul TTS) via Pipecat. The Deepgram/Flux English

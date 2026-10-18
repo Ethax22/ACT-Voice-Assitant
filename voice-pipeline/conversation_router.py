@@ -87,36 +87,6 @@ Language = Literal["en", "ta"]
 Style = Literal["en", "ta", "ta_en"]
 Topic = Literal["about-us", "admissions", "courses", "placements"]
 
-# One voice per topic, per language. "about-us" doubles as the default/
-# fallback voice (unmatched questions, and the voice a call starts on) —
-# same pattern the old Deepgram design used rather than introducing a fifth
-# voice. All four names below were verified live against Sarvam's real
-# /text-to-speech endpoint for BOTH en-IN and ta-IN (2026-09-29) — Sarvam's
-# bulbul:v3 speakers are cross-lingual identities, not English-only or
-# Tamil-only, so the same four names work for both languages; only the
-# language-appropriate default (priya/kavya) differs, matching what was
-# already locked in per language before this change.
-#
-# Gender assignment matches the widget's own avatar images per topic
-# (widget/index.html's topic cards: About Us and Placements show a woman,
-# Courses and Admissions show a man) — corrected 2026-09-29 after the
-# initial pick didn't match those images (admissions/courses had swapped
-# genders from what the UI shows).
-TOPIC_VOICES: dict[Language, dict[Topic, str]] = {
-    "en": {
-        "about-us": "ritu",
-        "courses": "aayan",
-        "admissions": "sunny",
-        "placements": "shreya",
-    },
-    "ta": {
-        "about-us": "ritu",
-        "courses": "aayan",
-        "admissions": "sunny",
-        "placements": "shreya",
-    },
-}
-
 # English keywords ported verbatim from the deleted rag-backend/voice_agent.py
 # (git commit 848cbad) — same collisions were already debugged there (see
 # its comments on "mission" vs "admission", and B.E./B.Tech backfiring into
@@ -469,7 +439,13 @@ class ConversationRouter(FrameProcessor):
             # Language only: the voice is fixed for the call and is never in
             # this delta.
             await self.push_frame(
-                TTSUpdateSettingsFrame(delta=TTSSettings(language=tts_language)),
+                TTSUpdateSettingsFrame(
+                    delta=TTSSettings(language=tts_language),
+                    # Also reaches the standby voice when pipeline.py wraps the
+                    # TTS in a fallback ServiceSwitcher, so a mid-call failover
+                    # speaks in the call's current language.
+                    reach_inactive_services=True,
+                ),
                 FrameDirection.DOWNSTREAM,
             )
 

@@ -13,7 +13,7 @@ Building an AI voice + chat assistant for Agni College of Technology's website �
 
 These were already decided across prior planning sessions. If a build step seems to call one of these into question, flag it to Prakash rather than silently deciding differently.
 
-1. **Compose-it-ourselves, not a bundled vendor agent — both languages now on Sarvam.** Updated 2026-09-25, superseding the original split: both English and Tamil are assembled from Sarvam's Saaras (STT) + Bulbul (TTS) via Pipecat — not Sarvam's bundled Samvaad product. Originally English ran on Deepgram's Voice Agent API (Flux STT/TTS) specifically for its built-in turn-taking/interruption handling, composed via a custom LLM endpoint; that's been dropped in favor of one shared voice vendor across both languages. Known tradeoff, accepted deliberately: the English path loses Deepgram's built-in turn-taking and must now replicate it manually via Pipecat, same as Tamil already does. Working Deepgram code (`rag-backend/voice_agent.py`) predates this change and needs retiring/replacing, not just leaving in place unused.
+1. **Compose-it-ourselves, not a bundled vendor agent — Sarvam listens, Cartesia speaks.** Updated 2026-10-18 at Prakash's decision: both languages are spoken by **Cartesia** (Sonic 3.6, one voice per call) via Pipecat; listening stays on Sarvam's Saaras (STT) and the answers on Sarvam 105B. Sarvam's Bulbul TTS and the Sarvam cloned voice were removed from the code — not kept as a backup voice. Reason: Cartesia's voice starts in ~0.1 s against 1.4-2.8 s for the Sarvam cloned voice, and Prakash's own listening found it handles Tamil and Tanglish; Cartesia was not adopted for listening because its speech-to-text (Ink) has no Tamil. Known cost: two voice vendors and a dollar bill instead of one. Earlier history: updated 2026-09-25, superseding the original split, both English and Tamil were assembled from Sarvam's Saaras (STT) + Bulbul (TTS) via Pipecat — not Sarvam's bundled Samvaad product. Originally English ran on Deepgram's Voice Agent API (Flux STT/TTS) specifically for its built-in turn-taking/interruption handling, composed via a custom LLM endpoint; that's been dropped in favor of one shared voice vendor across both languages. Known tradeoff, accepted deliberately: the English path loses Deepgram's built-in turn-taking and must now replicate it manually via Pipecat, same as Tamil already does. Working Deepgram code (`rag-backend/voice_agent.py`) predates this change and needs retiring/replacing, not just leaving in place unused.
 2. **One shared RAG backend answers all three input paths**: typed chat, English voice, and Tamil voice all call the same FastAPI backend's `/v1/chat/completions` endpoint. Never let a language or input mode fork onto its own separate LLM/knowledge base — that's the one thing this whole architecture is designed to avoid.
 3. **The RAG backend must be stateful across a conversation** — pass the full message history on every call, not just the latest turn. A version that only reads `messages[-1]` is a regression, not a simplification.
 4. **The system prompt must carry a persona** ("Agni AI" — warm, brief, conversational — see the prompt template in the Implementation Plan). Don't strip this down to a bare "answer from context" instruction; that's what makes it feel robotic.
@@ -26,11 +26,11 @@ These were already decided across prior planning sessions. If a build step seems
 
 These weren't in the original Implementation Plan but are confirmed in-scope for v1, not phase-2 nice-to-haves. See `docs/Implementation_Plan_API_Based.md` phases 7–10 for the build detail:
 
-- **Cloned staff voice** for both languages, via Sarvam voice cloning — deferred fast-follow, not a launch blocker (decided 2026-09-26). v1 ships on Sarvam's default stock voices already selected in `voice-pipeline/pipeline.py`; swap in the cloned voice ID whenever staff samples/cloning are done.
+- **Cloned staff voice** for both languages — deferred fast-follow, not a launch blocker (decided 2026-09-26). Since 2026-10-18 this means a **Cartesia** clone (instant clone from a 10-60 s consented recording; a Cartesia clone is built in one language, other languages are added with Cartesia's Add Voice Accents). v1 ships on the Cartesia library voice in `CARTESIA_VOICE_ID`; put the clone's voice id there when it exists, no code change needed.
 - **Admission-intent lead capture**: detect clear admission interest mid-conversation, collect name/phone/email/preferred course, write to **Google Sheets** (decided 2026-09-26, via a service account + `gspread` — simpler than Excel/OneDrive's Graph API/OAuth overhead).
 - **Difficult/sensitive-question handling** via pre-approved talking points (e.g. department-vs-placement comparisons) sourced from admissions/faculty, not improvised by the model.
 - **Full transcript + audio logging** of every conversation — **local disk, 90-day retention, auto-pruned** (decided 2026-09-26).
-- **Sentiment report for the website bot** (added 2026-10-07 at Prakash's request, superseding the Website Voice Bot doc's "sentiment is out of scope for the web bot" line). It is a **post-conversation** report built from the saved transcripts by `rag-backend/sentiment_report.py` (Sarvam 105B, run by hand, output in `rag-backend/reports/`, same 90-day retention) — not real-time scoring during a call, which stays the Calling Agent's requirement. Its labels have not been checked against hand-labelled conversations in either language; don't present them as validated until that's done.
+- **Sentiment report for the website bot** (added 2026-10-07 at Prakash's request, superseding the Website Voice Bot doc's "sentiment is out of scope for the web bot" line). It is a **post-conversation** report built from the saved transcripts by `rag-backend/sentiment_report.py` (Sarvam 105B, output in `rag-backend/reports/`, same 90-day retention; since 2026-10-09 the running backend rebuilds the last 7 days every 24 hours — `SENTIMENT_REPORT_INTERVAL_HOURS`, 0 = off — and it can still be run by hand) — not real-time scoring during a call, which stays the Calling Agent's requirement. Its labels have not been checked against hand-labelled conversations in either language; don't present them as validated until that's done.
 
 ## Related product — not built in this repo
 
@@ -48,7 +48,7 @@ ACT-Voice-Assistant/
 ├── rag-backend/          # FastAPI — the shared "brain," all three paths call this (LLM: Sarvam 105B)
 ├── voice-pipeline/       # renamed from tamil-voice-pipeline/ once generalized (Implementation
                            # Plan phase 3) — one Pipecat service serving BOTH languages
-                           # (Sarvam STT + RAG backend + Sarvam TTS), parameterized by language
+                           # (Sarvam STT + RAG backend + Cartesia TTS), parameterized by language
 └── widget/               # One-page site + Agni AI widget (starting point already exists —
                            # ask Prakash for the current the current widget HTML if not yet copied in)
 ```
@@ -56,7 +56,8 @@ ACT-Voice-Assistant/
 ## Environment variables (never commit these)
 
 ```
-SARVAM_API_KEY=            # now the only vendor key — covers LLM (105B), STT (Saaras), TTS (Bulbul)
+SARVAM_API_KEY=            # LLM (105B) and STT (Saaras)
+CARTESIA_API_KEY=          # voice-pipeline only — TTS (Sonic); never in browser code (decision #7)
 RAG_BACKEND_AUTH_KEY=      # your own bearer token, checked by rag-backend, used by
                            # the voice pipeline's LLM call and the widget's proxy
 ```

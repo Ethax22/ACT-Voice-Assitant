@@ -1,4 +1,4 @@
-"""Voice pipeline: Sarvam STT -> shared RAG backend -> Sarvam TTS, composed
+"""Voice pipeline: Sarvam STT -> shared RAG backend -> Cartesia TTS, composed
 with Pipecat. Serves BOTH languages, parameterized by `language` — points at
 the SAME rag-backend for both (via an OpenAI-compatible custom endpoint)
 that's what keeps English and Tamil answers consistent, per the one-shared-
@@ -15,7 +15,7 @@ docs/Voice_Model_Choices.md for rationale):
   pipecat/services/sarvam/stt.py `_SUPPORTED_REALTIME_MODELS`). Note the name
   is "saaras:v4", NOT "saaras:v4-realtime", which the endpoint rejects.
   `language_code` is configured per language.
-- TTS: bulbul:v3 (bulbul:v2 is deprecated — Sarvam's API now rejects it)
+- TTS: Cartesia Sonic (sonic-3.6) since 2026-10-18, replacing Sarvam bulbul:v3.
 """
 import asyncio
 import os
@@ -130,74 +130,48 @@ VAD_TUNING = {
 
 # Model choices — see docs/Voice_Model_Choices.md.
 STT_MODEL = "saaras:v4"
-TTS_MODEL = "bulbul:v3"
-# Placeholder picks — verify by ear against real ACT answers (Phase 5's
-# native-speaker listening test) before locking in, same as the original
-# Tamil choice. Voice cloning (Phase 7, deferred) overrides the "about-us"
-# entry only, once staff samples are ready (see CLONED_VOICE_IDS below) —
-# the other three topic voices stay stock even after cloning lands, since
-# only one cloned identity has ever been planned.
-#
-# "en" was originally "amelia" (per Pipecat 1.10.0's own SarvamTTSSpeakerV3
-# enum) but Sarvam's live API rejected it with 400 "Speaker 'amelia' is not
-# recognized" — confirmed live 2026-09-25. The installed package's enum is
-# stale relative to Sarvam's actual voice list (also missing newer speakers
-# like anand/tanya/shruti/etc. that the live 400 error's "Available speakers"
-# list included). Don't trust Pipecat's enum for this — if picking a
-# different voice later, verify against a live call's error message or
-# current Sarvam docs, not the enum.
-#
-# 2026-09-29: expanded from one voice per language to four, restoring a
-# feature the old Deepgram-only English path had (CATEGORY_VOICES in the
-# now-deleted rag-backend/voice_agent.py, git commit 848cbad) and adding it
-# to Tamil for the first time — see conversation_router.py's module
-# docstring for the full history and the live-verification that all four
-# names work for both en-IN and ta-IN. TOPIC_VOICES has replaced the old
-# flat TTS_VOICES dict; "about-us" is both the default/fallback voice and
-# the one a call starts on, same role TTS_VOICES used to play alone.
-# (Imported inside build_pipeline(), like every other pipecat-adjacent
-# import in this file, not at module level.)
 
 LANGUAGE_CODES: dict[Language, str] = {
     "en": "en-IN",
     "ta": "ta-IN",
 }
 
-# Phase 7 — voice cloning. Originally one cloned voice_id per LANGUAGE
-# (overriding only the "about-us" slot); 2026-09-29 widened to one per
-# TOPIC instead, shared across BOTH languages — a Sarvam cloned voice_id
-# (format `svc-{uuid}`, created via `POST /voices/create` from a consented
-# staff recording, see create_cloned_voice.py) turned out to be
-# cross-lingual, same as a stock voice: confirmed live that a voice cloned
-# from an English reference recording produced real, audible Tamil speech
-# when asked to (see cloned_voice_tts.py's module docstring for the actual
-# test). So each topic needs exactly ONE staff recording total, not one per
-# language — four recordings covers "about-us"/"admissions"/"courses"/
-# "placements" for both English and Tamil, not eight.
-#
-# 2026-10-09: only the "about-us" entry is used now - it is the one voice for
-# the whole call, whatever the topic or language (build_pipeline). The other
-# three entries are read but ignored; they are left in place so the env file
-# and greeting_cache.py keep working unchanged. With no about-us ID set, the
-# call uses the stock About Us voice (TOPIC_VOICES[language]["about-us"]).
-# dict[Topic, str | None] conceptually — Topic itself isn't imported at
-# module level (it lives in conversation_router.py, only imported lazily
-# inside build_pipeline(), like every other pipecat-adjacent import here).
-CLONED_VOICE_IDS: dict[str, str | None] = {
-    "about-us": os.environ.get("CLONED_VOICE_ID_ABOUT_US") or None,
-    "admissions": os.environ.get("CLONED_VOICE_ID_ADMISSIONS") or None,
-    "courses": os.environ.get("CLONED_VOICE_ID_COURSES") or None,
-    "placements": os.environ.get("CLONED_VOICE_ID_PLACEMENTS") or None,
-}
+# Speaking is Cartesia only (Prakash, 2026-10-18). Listening (Saaras) and the
+# answers (Sarvam 105B via rag-backend) stay on Sarvam. The Sarvam voices - stock
+# Bulbul, the Sarvam cloned voice and its custom service - were removed; they are
+# in git history (commit f86072e and earlier) if ever needed. A Cartesia voice,
+# stock or cloned, is an ordinary voice id on the same streaming websocket.
+CARTESIA_MODEL = os.environ.get("CARTESIA_MODEL", "").strip() or "sonic-3.6"
+CARTESIA_VOICE_ID = os.environ.get("CARTESIA_VOICE_ID", "").strip() or None
 
 
-def _optional_float_settings(**env_names: str) -> dict[str, float]:
-    """{setting: float(env value)} for each named env var that is set."""
-    return {
-        setting: float(os.environ[env])
-        for setting, env in env_names.items()
-        if os.environ.get(env, "").strip()
-    }
+def cartesia_api_key() -> str:
+    # The local .env was first written with the name CARTESIAN_API_KEY; accept both.
+    key = os.environ.get("CARTESIA_API_KEY") or os.environ.get("CARTESIAN_API_KEY")
+    if not key:
+        raise RuntimeError("CARTESIA_API_KEY is missing from voice-pipeline/.env")
+    return key
+
+
+def cartesia_generation_settings() -> dict[str, float | str]:
+    """Delivery settings for the Cartesia voice, from the env; empty = voice defaults.
+
+    CARTESIA_SPEED 0.6-1.5 (1.0 = normal), CARTESIA_VOLUME 0.5-2.0, and
+    CARTESIA_EMOTION (e.g. "calm", "content", "enthusiastic"; Cartesia's docs say
+    emotion works best on some voices, so judge it by ear). Used by the live voice
+    and by greeting_cache.py, so greetings match calls.
+    """
+    out: dict[str, float | str] = {}
+    speed = os.environ.get("CARTESIA_SPEED", "").strip()
+    if speed:
+        out["speed"] = min(1.5, max(0.6, float(speed)))
+    volume = os.environ.get("CARTESIA_VOLUME", "").strip()
+    if volume:
+        out["volume"] = min(2.0, max(0.5, float(volume)))
+    emotion = os.environ.get("CARTESIA_EMOTION", "").strip()
+    if emotion:
+        out["emotion"] = emotion
+    return out
 
 
 def build_pipeline(websocket, language: Language, session_id: str):
@@ -220,7 +194,8 @@ def build_pipeline(websocket, language: Language, session_id: str):
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
     from pipecat.services.openai.llm import OpenAILLMService
     from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
-    from pipecat.services.sarvam.tts import SarvamTTSService
+    from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
+    from pipecat.services.tts_service import TextAggregationMode
     from pipecat.transports.websocket.fastapi import (
         FastAPIWebsocketParams,
         FastAPIWebsocketTransport,
@@ -229,7 +204,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
     import greeting_cache
     from conversation_logger import TranscriptLogger, save_session_audio
     from greeting_cache import GreetingPlayer, PlayGreetingFrame
-    from conversation_router import ConversationRouter, ConversationRouterCallbacks, TOPIC_VOICES
+    from conversation_router import ConversationRouter, ConversationRouterCallbacks
     from latency_metrics import LatencyLogger, TurnTrace
     from raw_pcm_serializer import RawPCMSerializer
     from speech_text_filter import to_speech
@@ -250,11 +225,11 @@ def build_pipeline(websocket, language: Language, session_id: str):
             # this file passed `sample_rate=16000`, which is a Pydantic model
             # that silently drops unknown kwargs instead of erroring, so it
             # had ZERO effect: audio_out silently fell back to Pipecat's
-            # default (24000, matching what Sarvam TTS natively generates),
+            # default (24000, the rate the TTS is asked for),
             # while the widget was told to play Tamil audio back at 16000 Hz
             # — that mismatch is what made the voice sound robotic/slowed.
             audio_in_sample_rate=16000,   # matches the mic audio the widget sends
-            audio_out_sample_rate=24000,  # matches Sarvam TTS's native output rate — no resampling needed
+            audio_out_sample_rate=24000,  # the rate Cartesia is asked for — no resampling needed
             # The browser widget speaks raw PCM16 over the WebSocket directly
             # (same minimal protocol regardless of language), not a telephony
             # format like Twilio's — serializer=None would silently discard
@@ -291,116 +266,46 @@ def build_pipeline(websocket, language: Language, session_id: str):
         ),
     )
 
-    # Stock TTS always exists — every topic without a configured cloned
-    # voice uses it, and it's the whole `tts` stage when NO topic is cloned
-    # (the common/default case today). NOTE: language/voice/model MUST go
-    # through `settings=`, not as flat kwargs — SarvamTTSService's __init__
-    # only accepts api_key directly plus a handful of deprecated/legacy
-    # args (model, voice_id); it silently swallows unrecognized kwargs like
-    # `language=`/`voice=` via **kwargs instead of erroring, which is what
-    # caused Sarvam to speak English with the default voice instead of
-    # Tamil/kavya in earlier testing.
     # How long Pipecat waits for a TTS reply's audio before it closes that reply's
-    # audio context. Its default is 3.0 s; a cloned voice's first audio took 3.18 s
-    # in a real call (2026-10-08), so the context was closed first, the audio that
-    # then arrived was thrown away ("no context ID provided" x hundreds) and the
-    # visitor heard nothing. Plenty of headroom instead of a tight guess.
+    # audio context. Its default is 3.0 s; a Sarvam cloned voice once took 3.18 s
+    # (2026-10-08) and the late audio was thrown away. Cartesia starts in ~0.1 s,
+    # so this is only headroom now.
     tts_wait_secs = float(os.environ.get("TTS_STOP_FRAME_TIMEOUT_SECS", "10"))
 
-    stock_tts = SarvamTTSService(
-        api_key=sarvam_api_key,
+    # Speaking: Cartesia, one voice for the whole call. Buffering: by default
+    # Pipecat sends one sentence at a time and turns Cartesia's own buffer off
+    # (max_buffer_delay_ms=0), the combination Cartesia recommends; first audio
+    # measured 0.06-0.20 s (2026-10-13/18). CARTESIA_TEXT_AGGREGATION=token
+    # streams words as the LLM writes them instead, and then Cartesia buffers on
+    # its side for CARTESIA_MAX_BUFFER_DELAY_MS (its default 3000; 0-5000). For
+    # A/B tests against the [latency] lines. No backup voice: if Cartesia fails
+    # for good during a call, the call has no voice (Prakash, 2026-10-18).
+    if not CARTESIA_VOICE_ID:
+        raise RuntimeError("CARTESIA_VOICE_ID is missing from voice-pipeline/.env")
+    generation = cartesia_generation_settings()
+    aggregation = os.environ.get("CARTESIA_TEXT_AGGREGATION", "").strip().lower() or "sentence"
+    buffer_ms = os.environ.get("CARTESIA_MAX_BUFFER_DELAY_MS", "").strip()
+    tts = CartesiaTTSService(
+        api_key=cartesia_api_key(),
+        sample_rate=24000,  # same PCM16 24 kHz the widget already plays
         text_transforms=[("*", to_speech)],
         stop_frame_timeout_s=tts_wait_secs,
-        settings=SarvamTTSService.Settings(
-            model=TTS_MODEL,
-            voice=TOPIC_VOICES[language]["about-us"],
-            language=language_code,
-            # Reported "robotic from the start" (2026-09-29) — we'd never
-            # set these, so they were sitting on Sarvam's own lowest-latency
-            # defaults (min_buffer_size=50, max_chunk_length=150). Sarvam's
-            # docs (docs.sarvam.ai, checked live, not assumed) confirm both
-            # trade latency for naturalness: min_buffer_size "balances
-            # latency with natural sentence completion," and Pipecat's own
-            # installed docstring for it says plainly "lower values reduce
-            # latency but may affect quality." Raised toward the middle of
-            # each documented range (30-200 / 50-500) rather than maxed out,
-            # to trade some latency for smoother prosody without making the
-            # reply's first words take too long to start. This is a
-            # reasoned experiment, not a verified fix — needs a real listen
-            # to confirm, same as the VAD tuning.
-            # Env-overridable so buffer settings can be A/B tested against
-            # the [latency] log lines without a code edit.
-            # 2026-10-09: default lowered from 120 to 40. Sarvam holds text until
-            # this many characters have arrived, and pipecat flushes only at the
-            # END of the reply, so with 120 a short first sentence (8-15 words,
-            # about 45-90 characters) waited for more text and the first words
-            # were not spoken until the LLM had written most of the reply. 40 lets
-            # the first short sentence go straight out. Trade-off: less text
-            # per synthesis call can mean less smooth prosody - decide by ear;
-            # TTS_MIN_BUFFER_SIZE overrides it without a code change.
-            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "40")),
-            max_chunk_length=int(os.environ.get("TTS_MAX_CHUNK_LENGTH", "300")),
-            # Voice tuning (step J): unset = Sarvam's own defaults. pace is a
-            # speed multiplier (0.5-2.0), temperature the variation in
-            # delivery (0.01-1.0) — ranges per the installed Pipecat's
-            # bulbul:v3 config. To be chosen by ear, not from code.
-            **_optional_float_settings(pace="TTS_PACE", temperature="TTS_TEMPERATURE"),
+        text_aggregation_mode=TextAggregationMode(aggregation),
+        max_buffer_delay_ms=int(buffer_ms) if buffer_ms else None,
+        settings=CartesiaTTSService.Settings(
+            model=CARTESIA_MODEL,
+            voice=CARTESIA_VOICE_ID,
+            # "en" / "ta". Mid-call changes arrive from conversation_router as
+            # "en-IN" / "ta-IN"; the service reduces those to the base code.
+            language=language,
+            generation_config=GenerationConfig(**generation) if generation else None,
         ),
     )
-
-    # Phase 7 — voice cloning. ONE voice for the whole call (2026-10-09): the
-    # About Us voice, `CLONED_VOICE_ID_ABOUT_US`, or its stock equivalent when no
-    # clone is configured. Earlier versions kept one TTS service per topic and
-    # switched between them with a ServiceSwitcher, which changed the speaker
-    # mid-call and opened up to four cloned-voice connections. The other three
-    # CLONED_VOICE_ID_* variables are no longer read. A cloned voice is
-    # cross-lingual (cloned_voice_tts.py), so the same voice speaks every style.
-    #
-    # CLONED_VOICE_TRANSPORT=persistent (default): one long-lived websocket for
-    # the whole call, text sent sentence by sentence. =per_utterance: the earlier
-    # version that opens a websocket per sentence (kept as a fallback).
-    cloned_voice_http_session = None
-    tts = stock_tts
-    session_voice_id = TOPIC_VOICES[language]["about-us"]
-    cloned_voice_id = CLONED_VOICE_IDS.get("about-us")
-    if cloned_voice_id:
-        from cloned_voice_tts import ClonedVoiceTTSService, PersistentClonedVoiceTTSService
-
-        transport_mode = os.environ.get("CLONED_VOICE_TRANSPORT", "persistent").lower()
-        voice_tuning = dict(
-            # Same clean-up and delivery tuning as the stock voice above.
-            # Without text_transforms the cloned voice reads raw text: the
-            # pronunciation fixes in speech_text_filter ("EEE" -> "triple E",
-            # "CSE" -> "C S E", years, markdown) only apply to the stock voice
-            # otherwise.
-            text_transforms=[("*", to_speech)],
-            stop_frame_timeout_s=tts_wait_secs,
-            min_buffer_size=int(os.environ.get("TTS_MIN_BUFFER_SIZE", "40")),
-            max_chunk_length=int(os.environ.get("TTS_MAX_CHUNK_LENGTH", "300")),
-            **_optional_float_settings(pace="TTS_PACE", temperature="TTS_TEMPERATURE"),
-        )
-        if transport_mode == "per_utterance":
-            import aiohttp
-
-            cloned_voice_http_session = aiohttp.ClientSession()
-            tts = ClonedVoiceTTSService(
-                api_key=sarvam_api_key,
-                aiohttp_session=cloned_voice_http_session,
-                voice_id=cloned_voice_id,
-                language_code=language_code,
-                sample_rate=24000,
-                **voice_tuning,
-            )
-        else:
-            tts = PersistentClonedVoiceTTSService(
-                api_key=sarvam_api_key,
-                voice_id=cloned_voice_id,
-                language_code=language_code,
-                sample_rate=24000,
-                **voice_tuning,
-            )
-        session_voice_id = cloned_voice_id
-        logger.info(f"Using the cloned About Us voice for the whole call ({transport_mode})")
+    session_voice_id = CARTESIA_VOICE_ID
+    logger.info(
+        f"Using Cartesia {CARTESIA_MODEL} voice {CARTESIA_VOICE_ID} for the whole call "
+        f"({aggregation}, settings {generation or 'default'})"
+    )
 
     # Persona lives in llm's system_instruction (current, non-deprecated
     # pattern) rather than as an initial "system" message here — either way
@@ -501,16 +406,16 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # back to the greeting ("what did you just say?") has it in history.
     #
     # Updated 2026-10-08: played from a pre-rendered clip (greeting_cache.py)
-    # instead of live TTS. A cloned voice needs ~1.7 s before its first audio,
-    # so a live greeting started ~2.3 s after connect and any early words from
-    # the visitor cancelled it before it was heard or logged. The clip starts
+    # instead of live TTS. The Sarvam cloned voice needed ~1.7 s before its first
+    # audio, so a live greeting started ~2.3 s after connect and any early words
+    # from the visitor cancelled it before it was heard or logged. Kept with
+    # Cartesia: still instant, and no API call per greeting. The clip starts
     # at once and is still interruptible like any other bot speech. If the
     # clip isn't cached yet, this call uses live TTS and the clip is rendered
     # in the background for the next call.
     @transport.event_handler("on_client_connected")
     async def _on_client_connected(transport, client):
-        cloned, stock = greeting_cache.about_us_voice(language)
-        clip = greeting_cache.load(language, cloned, stock, GREETINGS[language])
+        clip = greeting_cache.load(language, GREETINGS[language])
         if clip:
             await worker.queue_frames([PlayGreetingFrame(GREETINGS[language], clip)])
         else:
@@ -519,12 +424,8 @@ def build_pipeline(websocket, language: Language, session_id: str):
 
     # On hangup, tear the whole pipeline down. Without this the Sarvam STT
     # websocket stays open until its 60s inactivity timeout fires an error.
-    # Also closes the aiohttp session ClonedVoiceTTSService opened above, if
-    # this call used one (the default persistent transport never creates one).
     @transport.event_handler("on_client_disconnected")
     async def _on_client_disconnected(transport, client):
-        if cloned_voice_http_session is not None:
-            await cloned_voice_http_session.close()
         await worker.cancel(reason="client disconnected")
 
     return worker

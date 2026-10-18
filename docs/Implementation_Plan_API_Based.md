@@ -31,12 +31,13 @@ copy-paste-final code.
 | Embeddings | ✅ Staying on Azure OpenAI (`text-embedding-3-small`) — separate from the LLM, kept as-is since Sarvam has no public embeddings API yet |
 | English voice (Deepgram) | ✅ Retired (Phase 2, 2026-09-25) — `voice_agent.py` deleted, `/voice/en` moved to `voice-pipeline/` |
 | English + Tamil voice (`voice-pipeline/`, Sarvam/Pipecat) | 🟡 Built and code-verified (Phases 3-6: generalized pipeline, greeting wired up, voice auto-detect; pre-connect detection switched off 2026-10-08, in-call switching only) — still needs a real human listening/mic test (Phase 4 barge-in feel, Phase 5 voice pick), not yet done |
+| Speaking voice (changed 2026-10-18) | 🟡 **Cartesia Sonic 3.6 only** — Sarvam Bulbul and the Sarvam cloned voice removed (CLAUDE.md decision #1). Listening (Saaras) and answers (Sarvam 105B) unchanged. Scripted calls: voice starts 0.06-0.20 s after the reply text (Sarvam clone was 1.4-2.8 s); end of speech to first audio median ~2.1 s, so the 0.7 s target is still missed. No backup voice. Not yet judged by ear or on a real mic. See `docs/Architecture_Current.md` §3. |
 | Automatic language detection | 🟡 Built (Phase 6, 2026-09-25) — typed chat fully verified; voice detection verified with synthesized test clips only, not yet a real visitor mic |
-| Voice cloning (Phase 7) | 🟡 Code built and verified live (see §8 below; cloned voice IDs are now per topic, `CLONED_VOICE_ID_ABOUT_US` etc., not per language) — deferred, not a launch blocker. Still needs real staff recordings (left to Prakash) before it's actually usable. Cloned voices need their own TTS service (not a settings swap); updated 2026-10-08: it now **streams** over Sarvam's `/voices/clone/ws`, with the non-streaming call kept only as fallback. First audio ≈1.7 s, so greetings are pre-rendered (`greeting_cache.py`). See §8. |
+| Voice cloning (Phase 7) | 🟡 **Superseded 2026-10-18:** the Sarvam cloning code (`cloned_voice_tts.py`, `create_cloned_voice.py`) was removed with the switch to Cartesia. A staff clone is now a Cartesia instant clone whose voice id goes in `CARTESIA_VOICE_ID`; no code needed. Still deferred, not a launch blocker; still needs a consented staff recording. §8 below is the Sarvam history. |
 | Lead capture (Phase 8) | ✅ Built and wired to Google Sheets (updated 2026-10-06). `capture_lead` triggers on name+phone in typed chat and the voice/streaming path (no tool-call chunks leak to the voice pipeline), phone numbers are validated, and `rag-backend/.env` has `GOOGLE_SERVICE_ACCOUNT_JSON` + `LEADS_SHEET_ID` set. A phone call through the Calling Agent also produced a lead with `source=phone`, so the Sheet write works. Not yet confirmed from a real website-widget visitor (only dev tests). **2026-10-09:** a real widget call showed the model saying "noted" without calling `capture_lead` (measured 1 of 4 calls in English, 0 of 4 in Tamil), so nothing reached the Sheet. `main.py` now forces the tool call (`tool_choice`) on any turn whose message contains a phone number (`_should_force_lead_capture`); an invalid number (e.g. 9 digits from speech recognition) saves nothing and the bot asks for it again. Checked with the Sheet write mocked, 4 of 4 valid numbers saved in en / ta / ta_en; not yet re-checked on a real call. |
 | Sensitive-question handling (Phase 9) | 🟡 Plumbing built and verified live (`rag-backend/knowledge_base/sensitive_topics.md` retrieved automatically, system prompt prefers "Talking point:" sections near-verbatim, correctly avoids leaking unfinished-content editor notes and avoids fabricating numbers it doesn't have) — **content itself is still draft placeholder text**, not the real admissions/faculty-approved wording CLAUDE.md requires. Needs Prakash/admissions to fill in each `[ADMISSIONS: ...]` bracket in that file before launch. |
 | Logging (Phase 10) | 🟡 Built. Typed chat: verified live end-to-end (`rag-backend/conversation_logger.py`, transcript written and 90-day pruning tested with a synthetic old folder). Voice: `voice-pipeline/conversation_logger.py`'s `TranscriptLogger` + Pipecat's `AudioBufferProcessor` are wired into the pipeline and confirmed to link correctly in a dry (no real audio) pipeline-construction test — **not yet confirmed with a real voice call**, since that needs actual audio flowing through, same category of human-verification gap as Phases 4-6. |
-| Sentiment report (added 2026-10-07) | 🟡 Built — `rag-backend/sentiment_report.py` reads saved typed-chat and voice transcripts, has Sarvam 105B label each conversation, and writes an HTML + CSV report to `rag-backend/reports/`. Run once on 48 dev-test conversations. Labels are **not validated** against hand-labelled conversations (English or Tamil), and the "unanswered questions" field is noisy. Run by hand; no schedule. See §11a. |
+| Sentiment report (added 2026-10-07) | 🟡 Built — `rag-backend/sentiment_report.py` reads saved typed-chat and voice transcripts, has Sarvam 105B label each conversation, and writes an HTML + CSV report to `rag-backend/reports/`. Run once on 48 dev-test conversations. Labels are **not validated** against hand-labelled conversations (English or Tamil), and the "unanswered questions" field is noisy. **2026-10-09:** now automatic — `rag-backend` rebuilds the last-7-days report every 24 h while it is running (`SENTIMENT_REPORT_INTERVAL_HOURS`, 0 = off); running it by hand still works. See §11a. |
 | Reply styles + mid-call language switch (reworked 2026-10-09) | 🟡 `voice-pipeline/conversation_router.py` no longer waits for language detection (it was up to 2.5 s on the first turn), classifies each turn locally as EN / TA / TA_EN (`style_classifier.py`, Tamil + English mixed in English letters), and keeps ONE voice (About Us) for the whole call — topic only lights the browser tile. Tamil/Tanglish prompts rewritten (`main.py` `LANGUAGE_RULES`, `TAMIL_STYLE`, `TANGLISH_STYLE`). Checked with synthesized speech only: results in `docs/Zimi_P0_Validation.md`; **no real-ear listening test yet**, Tanglish word list and prompts unreviewed by a native speaker. |
 | Voice latency work | 🟡 `voice-pipeline/latency_metrics.py` logs per-turn `[latency]` lines (STT/LLM/TTS first byte, user-stopped → bot-audio). Backend first word measured ≈ 1.7 s over HTTP (retrieval ≈ 0.3–0.45 s, Sarvam 105B first token ≈ 0.4 s); a retrieval-query cache was added. **No real voice-call numbers yet** — tuning of VAD silence, TTS buffers and answer length waits on them (see `docs/Session_Handoff_ERP_CallAgent_VoiceLatency.md` §6). |
 | Calling Agent (separate product, not built in this repo) | 🟡 Runs on Sarvam Indus, not DIY. Reaches this repo only via `POST /calling-agent/ask` (shared brain + lead capture). Real inbound call tested: answers, Tamil/English, ERP lookup (separate service, fake contacts), lead capture, transfer. Not launch-ready (hosting, real ERP data, transfer-routing retest, consent/retention sign-off); outbound and sentiment not started. See `docs/Calling_Agent_Build_Plan.md` and the 2026-10-05 handoff. |
@@ -222,6 +223,10 @@ each:
 
 ## 8. Phase 7 — Voice cloning (both languages) — code built 2026-09-27, still not a launch blocker
 
+> **2026-10-18: this section is history.** The bot now speaks with Cartesia, and the
+> Sarvam cloning code described below was deleted. A clone is a Cartesia voice id in
+> `CARTESIA_VOICE_ID`.
+
 Decided 2026-09-26: v1 launches on Sarvam's **default stock voices** (already
 selected in `pipeline.py`, e.g. `kavya`) — cloning is a fast-follow
 improvement done whenever staff samples are ready, not a gate on Phases 8–13.
@@ -358,8 +363,14 @@ that remains the Calling Agent's requirement, in its own codebase.
 - The "unanswered questions" field varied a lot with prompt wording during
   the build (7 to 28 of 48 conversations) and sometimes listed questions the
   bot did answer. Treat it as a hint until tuned against real data.
-- Decide whether it should run on a schedule or be shown anywhere other than
-  the local report file.
+- Decide whether it should be shown anywhere other than the local report file.
+
+**Automatic run (added 2026-10-09):** `main.py` starts
+`sentiment_report.run_periodically()` as a background task at startup. Whenever
+the newest report in `rag-backend/reports/` is older than
+`SENTIMENT_REPORT_INTERVAL_HOURS` (default 24; 0 turns it off) it rebuilds the
+last 7 days. It only runs while the backend is running, and it is still a
+post-conversation job — nothing is scored during a call.
 
 ## 12. Phase 11 — Consistency QA
 
@@ -393,12 +404,12 @@ that remains the Calling Agent's requirement, in its own codebase.
 
 ## 15. Definition of Done (v1)
 
-- [ ] LLM and voice both run on Sarvam; no Azure/Deepgram code or keys remain
+- [ ] LLM and listening run on Sarvam, speaking on Cartesia (2026-10-18); no Azure chat/Deepgram code or keys remain
 - [ ] Visitor can type a question and get an answer from the RAG backend
 - [ ] Visitor gets a full spoken conversation in either language, auto-detected,
       with a manual override available
 - [ ] Both languages and typed chat answer the same test-question set consistently
-- [ ] Voice launches on Sarvam's default voices (cloning is a fast-follow, not a launch gate — see Phase 7)
+- [ ] Voice launches on a Cartesia library voice (a staff clone is a fast-follow, not a launch gate — see Phase 7)
 - [ ] Admission-intent visitors get captured as structured leads in Google Sheets
 - [ ] Known sensitive questions answered via approved talking points
 - [ ] Every conversation logged to local disk (transcript + audio), auto-pruned after 90 days
