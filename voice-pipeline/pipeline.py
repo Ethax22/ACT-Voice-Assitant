@@ -189,6 +189,10 @@ class PipelineProfile:
     llm_headers: dict[str, str] = field(default_factory=dict)  # sent to rag-backend on every turn
     tools: Any = None  # a Pipecat ToolsSchema offered to the model
     function_handlers: dict[str, Any] = field(default_factory=dict)  # tool name -> async handler(params)
+    user_idle_timeout: float = 0  # seconds of caller silence before on_user_turn_idle fires; 0 = never
+    # Called once when the pipeline is built, with the parts a call needs to hook into
+    # (worker, llm, context, user_aggregator, transport, router).
+    on_built: Any = None
 
 
 def build_pipeline(websocket, language: Language, session_id: str, profile: PipelineProfile | None = None):
@@ -335,9 +339,13 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
     # always injects its own persona + retrieved context server-side, so
     # this only matters for staying off Pipecat's deprecated path.
     context = LLMContext(messages=[], tools=profile.tools) if profile.tools else LLMContext(messages=[])
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context, user_params=build_user_aggregator_params(language)
-    )
+    user_params = build_user_aggregator_params(language)
+    if profile.user_idle_timeout:
+        from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
+
+        user_params = user_params or LLMUserAggregatorParams()
+        user_params.user_idle_timeout = profile.user_idle_timeout
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context, user_params=user_params)
 
     # 2026-09-29: per-topic voice switching + mid-call language switching —
     # see conversation_router.py's module docstring. Sits between STT and
@@ -450,4 +458,11 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
     async def _on_client_disconnected(transport, client):
         await worker.cancel(reason="client disconnected")
 
+    if profile.on_built:
+        from types import SimpleNamespace
+
+        profile.on_built(SimpleNamespace(
+            worker=worker, llm=llm, context=context, user_aggregator=user_aggregator,
+            transport=transport, router=router,
+        ))
     return worker

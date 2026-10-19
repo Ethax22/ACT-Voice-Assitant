@@ -178,3 +178,41 @@ def test_phone_calls_forbid_bro_in_every_style_but_the_website_english_does_not(
 
     assert main.NO_BRO_FINAL in final_system(phone=True)
     assert main.NO_BRO_FINAL not in final_system(phone=False)
+
+
+def test_a_register_number_is_not_forced_into_a_lead():
+    reg = [{"role": "user", "content": "my register number is 312823104004"}]
+    assert main._should_force_lead_capture(reg, "t-force-1") is True          # a stranger's long number: still forced
+    assert main._should_force_lead_capture(reg, "t-force-2", "student") is False
+    assert main._should_force_lead_capture(reg, "t-force-3", "faculty") is False
+    asked = [{"role": "assistant", "content": "Please tell me the student's register number."}, *reg]
+    assert main._should_force_lead_capture(asked, "t-force-4") is False
+    phone = [{"role": "user", "content": "my number is 9876543210"}]
+    assert main._should_force_lead_capture(phone, "t-force-5") is True
+
+
+def test_phone_block_fits_who_is_calling():
+    student = main._phone_block({"role": "student", "name": "Abinaya"})
+    assert "get_student_report" in student and "first name Abinaya" in student and "transfer_call" in student
+    assert "get_class_summary" in main._phone_block({"role": "faculty", "name": ""})
+    unknown = main._phone_block({"role": "", "name": ""})
+    assert "not a registered student" in unknown and "get_student_report" not in unknown
+
+
+def test_forced_tool_choice_for_the_three_turns_that_can_only_be_one_thing():
+    tools = [STUDENT_TOOL, {"type": "function", "function": {"name": "transfer_call"}}]
+
+    def choice(msgs, role=None):
+        c = main._forced_tool_choice(msgs, "t-fc", role, tools)
+        return c.get("tool_choice", {}).get("function", {}).get("name") if c else None
+
+    ask_dob = [{"role": "assistant", "content": "And the student's date of birth?"},
+               {"role": "user", "content": "twelfth April two thousand five"}]
+    assert choice(ask_dob, "student") == "get_student_report"
+    assert choice(ask_dob, "faculty") is None and choice(ask_dob, None) is None
+    assert choice([{"role": "user", "content": "I want to talk to someone in admissions"}]) == "transfer_call"
+    offered = [{"role": "assistant", "content": "Would you like me to transfer you to admissions?"},
+               {"role": "user", "content": "yes please"}]
+    assert choice(offered) == "transfer_call"
+    assert choice([{"role": "user", "content": "What are the hostel fees?"}]) is None
+    assert main._forced_tool_choice([{"role": "user", "content": "talk to someone"}], "t-fc", None, None) == {}
