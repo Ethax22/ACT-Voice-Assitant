@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from collections import OrderedDict
 
 from dotenv import load_dotenv
@@ -204,6 +205,37 @@ CAPTURE_LEAD_TOOL = {
         },
     },
 }
+
+
+# Tools this backend runs itself. Any other tool the model calls belongs to the
+# caller (the phone agent declares its ERP tools in the request) and is handed
+# back to it instead of being resolved here.
+OWNED_TOOLS = {"capture_lead"}
+
+
+def _foreign_tool_calls(calls: list[dict]) -> list[dict]:
+    return [c for c in calls if (c.get("function") or {}).get("name") not in OWNED_TOOLS]
+
+
+def _tool_call_sse(calls: list[dict]):
+    """The caller's tool calls as OpenAI chat-completion chunks: one chunk with
+    every call whole, then the finish chunk. Pipecat reads these as a function call."""
+    base = {"id": f"chatcmpl-{uuid.uuid4().hex[:24]}", "object": "chat.completion.chunk",
+            "created": int(time.time()), "model": CHAT_MODEL}
+    delta = {"tool_calls": [{"index": i, "id": c["id"], "type": "function", "function": c["function"]}
+                            for i, c in enumerate(calls)]}
+    yield f"data: {json.dumps({**base, 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]})}\n\n"
+    yield f"data: {json.dumps({**base, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'tool_calls'}]})}\n\n"
+
+
+_HEADER_TEXT = re.compile(r"[^\w .'-]")
+
+
+def _caller_from_headers(request: Request) -> dict:
+    """Who the phone agent says is calling (X-Caller-Role / X-Caller-Name), cleaned
+    because it ends up inside the prompt."""
+    return {k: _HEADER_TEXT.sub("", request.headers.get(f"x-caller-{k}", ""))[:40].strip()
+            for k in ("role", "name")}
 
 
 TAMIL_UNICODE_BLOCK = range(0x0B80, 0x0C00)
@@ -734,9 +766,18 @@ NO_BRO_FINAL = (
 )
 
 
+def _caller_line(caller: dict | None) -> str:
+    """One line about the caller, from the phone agent's records lookup. The
+    full phone/records rules arrive with Phase 3 step 3.2."""
+    if not caller or not caller.get("role"):
+        return ""
+    name = f", first name {caller['name']}" if caller.get("name") else ""
+    return f"\nThe caller was identified from their phone number: role {caller['role']}{name}."
+
+
 async def _build_full_messages(
     messages: list[dict], voice: bool = False, session_id: str | None = None,
-    phone: bool = False,
+    phone: bool = False, caller: dict | None = None,
 ) -> list[dict]:
     """Shared brain: retrieve context for the latest turn and prepend the
     Agni AI persona + that context to the FULL conversation history, so
@@ -800,6 +841,7 @@ async def _build_full_messages(
             + (BACKCHANNEL_ADDENDUM if kind == "ack" else "")
             + STYLE_BLOCKS.get(language, "")
             + (PHONE_TANGLISH_NO_BRO if phone and language == "ta_en" else "")
+            + (_caller_line(caller) if phone else "")
             + derive_state(messages, session_id).prompt_block(),
         },
         *messages,  # preserves every prior user/assistant turn
@@ -818,7 +860,8 @@ async def _build_full_messages(
 
 
 async def _generate_reply(
-    messages: list[dict], source: str = "chat", session_id: str | None = None
+    messages: list[dict], source: str = "chat", session_id: str | None = None,
+    client_tools: list[dict] | None = None, caller: dict | None = None,
 ):
     """Non-streaming reply — used by the widget's typed chat, which just
     wants the final text, not incremental tokens.
@@ -835,17 +878,29 @@ async def _generate_reply(
     finish_reason, only a normal assistant message."""
     full_messages = await _build_full_messages(
         messages, voice=(source in _SPOKEN_SOURCES), session_id=session_id,
-        phone=(source == "phone"),
+        phone=(source == "phone"), caller=caller,
     )
+    all_tools = [CAPTURE_LEAD_TOOL, *(client_tools or [])]
     response = await chat_client.chat.completions.create(
         model=CHAT_MODEL,
         messages=full_messages,
-        tools=[CAPTURE_LEAD_TOOL],
+        tools=all_tools,
         **({"tool_choice": FORCE_CAPTURE_LEAD} if _should_force_lead_capture(messages, session_id) else {}),
         extra_body=DISABLE_REASONING,
     )
     choice = response.choices[0]
     if choice.finish_reason == "tool_calls":
+        calls = choice.message.model_dump().get("tool_calls") or []
+        foreign = _foreign_tool_calls(calls)
+        if foreign:
+            # The caller's tool: save any lead in the same turn, then hand the
+            # caller's calls back unresolved (it runs them and calls again).
+            owned = [c for c in calls if c not in foreign]
+            if owned:
+                await _resolve_tool_calls(full_messages, {"role": "assistant", "content": None, "tool_calls": owned},
+                                          source, session_id)
+            choice.message.tool_calls = [c for c in choice.message.tool_calls if c.function.name not in OWNED_TOOLS]
+            return response
         extended_messages = await _resolve_tool_calls(
             full_messages, choice.message.model_dump(), source, session_id
         )
@@ -856,14 +911,15 @@ async def _generate_reply(
             # `tools` is omitted here — it's required on any call whose
             # message history contains tool/tool_calls entries, not just the
             # call that first offers them.
-            tools=[CAPTURE_LEAD_TOOL],
+            tools=all_tools,
             extra_body=DISABLE_REASONING,
         )
     return response
 
 
 async def _stream_reply_sse(
-    messages: list[dict], source: str = "voice", session_id: str | None = None
+    messages: list[dict], source: str = "voice", session_id: str | None = None,
+    client_tools: list[dict] | None = None, caller: dict | None = None,
 ):
     """Streaming reply, as Server-Sent Events in OpenAI's chat-completion-
     chunk format, required by the Tamil (and now English) Pipecat pipeline's
@@ -880,8 +936,10 @@ async def _stream_reply_sse(
     plain content deltas, exactly as before Phase 8."""
     t_start = time.perf_counter()
     full_messages = await _build_full_messages(
-        messages, voice=(source in _SPOKEN_SOURCES), session_id=session_id
+        messages, voice=(source in _SPOKEN_SOURCES), session_id=session_id,
+        phone=(source == "phone"), caller=caller,
     )
+    all_tools = [CAPTURE_LEAD_TOOL, *(client_tools or [])]
     current_messages = full_messages
 
     for round_no in range(2):  # at most one tool-resolution round-trip
@@ -890,7 +948,7 @@ async def _stream_reply_sse(
             model=CHAT_MODEL,
             messages=current_messages,
             stream=True,
-            tools=[CAPTURE_LEAD_TOOL],
+            tools=all_tools,
             # First round only: the follow-up round (after the tool result) must
             # be free to answer in words.
             **({"tool_choice": FORCE_CAPTURE_LEAD}
@@ -955,13 +1013,26 @@ async def _stream_reply_sse(
             "content": None,
             "tool_calls": [
                 {
-                    "id": entry["id"],
+                    "id": entry["id"] or f"call_{uuid.uuid4().hex[:24]}",
                     "type": "function",
                     "function": {"name": entry["name"], "arguments": entry["arguments"]},
                 }
                 for entry in tool_calls.values()
             ],
         }
+        foreign = _foreign_tool_calls(assistant_message["tool_calls"])
+        if foreign:
+            # The caller's tool: save any lead in the same turn, then send the
+            # caller's calls on unresolved (it runs them and calls again).
+            owned = [c for c in assistant_message["tool_calls"] if c not in foreign]
+            if owned:
+                await _resolve_tool_calls(
+                    current_messages, {**assistant_message, "tool_calls": owned}, source, session_id
+                )
+            for chunk in _tool_call_sse(foreign):
+                yield chunk
+            yield "data: [DONE]\n\n"
+            return
         current_messages = await _resolve_tool_calls(
             current_messages, assistant_message, source, session_id
         )
@@ -981,10 +1052,15 @@ async def chat_completions(request: Request):
     # voice-pipeline sends its per-call id so conversation_state can remember
     # that a lead was already saved on this call.
     session_id = request.headers.get("x-session-id")
+    # The phone agent says so with X-Source; anything else is the website voice.
+    source = "phone" if request.headers.get("x-source") == "phone" else "voice"
+    client_tools = body.get("tools") or None
+    caller = _caller_from_headers(request)
 
     if body.get("stream"):
         return StreamingResponse(
-            _stream_reply_sse(body["messages"], source="voice", session_id=session_id),
+            _stream_reply_sse(body["messages"], source=source, session_id=session_id,
+                              client_tools=client_tools, caller=caller),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -993,7 +1069,8 @@ async def chat_completions(request: Request):
             },
         )
 
-    response = await _generate_reply(body["messages"], source="voice", session_id=session_id)
+    response = await _generate_reply(body["messages"], source=source, session_id=session_id,
+                                     client_tools=client_tools, caller=caller)
     return response.model_dump()
 
 

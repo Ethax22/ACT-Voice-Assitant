@@ -19,7 +19,8 @@ docs/Voice_Model_Choices.md for rationale):
 """
 import asyncio
 import os
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -174,7 +175,23 @@ def cartesia_generation_settings() -> dict[str, float | str]:
     return out
 
 
-def build_pipeline(websocket, language: Language, session_id: str):
+@dataclass
+class PipelineProfile:
+    """What differs between a website call and another kind of call (the phone
+    agent). The defaults are the website's, so build_pipeline(ws, lang, id) with no
+    profile behaves exactly as it did before profiles existed."""
+
+    serializer: Any = None  # None: the browser widget's raw PCM16 over the socket
+    audio_in_rate: int = 16000
+    audio_out_rate: int = 24000
+    tts_rate: int = 24000
+    greetings: dict[str, str] | None = None  # None: GREETINGS above
+    llm_headers: dict[str, str] = field(default_factory=dict)  # sent to rag-backend on every turn
+    tools: Any = None  # a Pipecat ToolsSchema offered to the model
+    function_handlers: dict[str, Any] = field(default_factory=dict)  # tool name -> async handler(params)
+
+
+def build_pipeline(websocket, language: Language, session_id: str, profile: PipelineProfile | None = None):
     """Builds the Pipecat pipeline for one browser voice session.
 
     `websocket` is an already-`accept()`-ed FastAPI WebSocket connection from
@@ -210,6 +227,8 @@ def build_pipeline(websocket, language: Language, session_id: str):
     from speech_text_filter import to_speech
     from turn_taking import build_user_aggregator_params, stt_silence_duration_ms
 
+    profile = profile or PipelineProfile()
+    greetings = profile.greetings or GREETINGS
     sarvam_api_key = os.environ["SARVAM_API_KEY"]
     rag_backend_public_url = os.environ["RAG_BACKEND_PUBLIC_URL"].rstrip("/")
     rag_backend_auth_key = os.environ.get("RAG_BACKEND_AUTH_KEY", "")
@@ -228,13 +247,13 @@ def build_pipeline(websocket, language: Language, session_id: str):
             # default (24000, the rate the TTS is asked for),
             # while the widget was told to play Tamil audio back at 16000 Hz
             # — that mismatch is what made the voice sound robotic/slowed.
-            audio_in_sample_rate=16000,   # matches the mic audio the widget sends
-            audio_out_sample_rate=24000,  # the rate Cartesia is asked for — no resampling needed
+            audio_in_sample_rate=profile.audio_in_rate,   # website: matches the mic audio the widget sends
+            audio_out_sample_rate=profile.audio_out_rate,  # website: the rate Cartesia is asked for, no resampling
             # The browser widget speaks raw PCM16 over the WebSocket directly
             # (same minimal protocol regardless of language), not a telephony
             # format like Twilio's — serializer=None would silently discard
             # every incoming message, so this needs a real one.
-            serializer=RawPCMSerializer(sample_rate=16000),
+            serializer=profile.serializer or RawPCMSerializer(sample_rate=16000),
         ),
     )
 
@@ -259,7 +278,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
         base_url=f"{rag_backend_public_url}/v1",
         # Lets rag-backend's conversation_state remember per-call facts the
         # message history can't show (a lead already saved on this call).
-        default_headers={"X-Session-Id": session_id},
+        default_headers={"X-Session-Id": session_id, **profile.llm_headers},
         settings=OpenAILLMService.Settings(
             model="agni-ai",  # ignored by our backend, which always uses its own Sarvam 105B model
             system_instruction=PERSONA_PROMPTS[language],
@@ -271,6 +290,9 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # (2026-10-08) and the late audio was thrown away. Cartesia starts in ~0.1 s,
     # so this is only headroom now.
     tts_wait_secs = float(os.environ.get("TTS_STOP_FRAME_TIMEOUT_SECS", "10"))
+
+    for tool_name, handler in profile.function_handlers.items():
+        llm.register_function(tool_name, handler)
 
     # Speaking: Cartesia, one voice for the whole call. Buffering: by default
     # Pipecat sends one sentence at a time and turns Cartesia's own buffer off
@@ -287,7 +309,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
     buffer_ms = os.environ.get("CARTESIA_MAX_BUFFER_DELAY_MS", "").strip()
     tts = CartesiaTTSService(
         api_key=cartesia_api_key(),
-        sample_rate=24000,  # same PCM16 24 kHz the widget already plays
+        sample_rate=profile.tts_rate,  # website: the same PCM16 24 kHz the widget already plays
         text_transforms=[("*", to_speech)],
         stop_frame_timeout_s=tts_wait_secs,
         text_aggregation_mode=TextAggregationMode(aggregation),
@@ -312,7 +334,7 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # our backend ignores whatever system content the client sends and
     # always injects its own persona + retrieved context server-side, so
     # this only matters for staying off Pipecat's deprecated path.
-    context = LLMContext(messages=[])
+    context = LLMContext(messages=[], tools=profile.tools) if profile.tools else LLMContext(messages=[])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context, user_params=build_user_aggregator_params(language)
     )
@@ -415,12 +437,12 @@ def build_pipeline(websocket, language: Language, session_id: str):
     # in the background for the next call.
     @transport.event_handler("on_client_connected")
     async def _on_client_connected(transport, client):
-        clip = greeting_cache.load(language, GREETINGS[language])
+        clip = greeting_cache.load(language, greetings[language])
         if clip:
-            await worker.queue_frames([PlayGreetingFrame(GREETINGS[language], clip)])
+            await worker.queue_frames([PlayGreetingFrame(greetings[language], clip)])
         else:
-            await worker.queue_frames([TTSSpeakFrame(GREETINGS[language])])
-            asyncio.create_task(greeting_cache.ensure_rendered(language))
+            await worker.queue_frames([TTSSpeakFrame(greetings[language])])
+            asyncio.create_task(greeting_cache.ensure_rendered(language, greetings[language]))
 
     # On hangup, tear the whole pipeline down. Without this the Sarvam STT
     # websocket stays open until its 60s inactivity timeout fires an error.

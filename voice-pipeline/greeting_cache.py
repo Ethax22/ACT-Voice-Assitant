@@ -126,11 +126,12 @@ async def render(language: str, text: str) -> bytes:
     return pcm
 
 
-async def ensure_rendered(language: str) -> None:
-    """Render the greeting for `language` if its cache file is missing."""
+async def ensure_rendered(language: str, text: str | None = None) -> None:
+    """Render the greeting for `language` if its cache file is missing. `text`
+    defaults to the website greeting; the phone agent passes its own."""
     from pipeline import GREETINGS
 
-    text = GREETINGS[language]
+    text = text or GREETINGS[language]
     if load(language, text) is not None:
         return
     try:
