@@ -1,8 +1,8 @@
 # Calling Agent — Implementation Plan (own pipeline, Cartesia voice)
 
 **Written:** 2026-10-19. **Companion to:** `Calling_Agent_DIY_Build_Plan.md` (the what and why; this file is the how and in what order).
-**Status (2026-10-19):** Phase 1 complete (all five steps). Phases 2 onward not started. Completed steps are marked ✅ in the tables below with the date; the "Result" notes under each phase say what was actually done and checked.
-**Commit state:** `C:\ACT-Calling-Agent`: first commit pushed to GitHub; the phone-agent scaffold commit is local only. `ACT-Voice-Assistant`: the Phase 1 changes to `rag-backend` and `voice-pipeline` are in the working tree, **uncommitted**, as is this file.
+**Status (2026-10-20):** Phases 1 and 2 complete, with the Phase 2 gaps listed under its Result note (barge-in on the phone line, not tuned). Phase 3 not started. Completed steps are marked ✅ in the tables below; the "Result" notes under each phase say what was actually done and checked.
+**Commit state:** Phase 1 is committed (`ACT-Voice-Assistant` `bcc663c`; `ACT-Calling-Agent` pushed to `1c17eaf`). Phase 2 work (the browser test line, the `rag-backend` no-"bro" fix, the `scenario_test.py --path` option) is in the working trees, **uncommitted**.
 
 ## 0. Decisions made (Prakash, 2026-10-19)
 
@@ -101,11 +101,21 @@ Legend: **P** = Prakash does it, **C** = Claude does it, **P+C** = together. "Ch
 
 | # | Task | Check |
 |---|---|---|
-| 2.1 | `phone_audio.py` + `/test/ws` + `static/test.html`: the page sends mic audio, the server squeezes it to 8 kHz μ-law and back (so it sounds like a phone line), and plays the reply the same way. A `?caller=9000000001` URL parameter stands in for caller ID | You can hold a call from the browser; audio is clearly narrowband |
-| 2.2 | `call_pipeline.py`: phone profile (8 kHz in, 8 kHz out for Cartesia, Sarvam STT at 8 kHz or resampled to 16 kHz: **decide by testing both**, keep the one with fewer misheard words), greeting clip with the new wording pre-rendered through `greeting_cache.py` (new text, so a new cache entry), `X-Source: phone` | Greeting plays with no live TTS delay; a question gets a spoken answer in the same words the website bot would give |
-| 2.3 | Run the 12 questions from the "Test questions" tab through the browser phone test in English, Tamil, Tanglish | Substance matches typed chat; no "bro"/"anna"; replies phone-length |
-| 2.4 | Phone turn-taking pass (VAD threshold, smart-turn wait, barge-in) with `phone_audio` noise/narrowband in the loop. Tune in `turn_taking.py` only through env-driven values so web is not affected | Checks 13 to 18 of the test list pass by browser; remaining tuning is marked "needs real phone" |
-| 2.5 | Logging to a phone folder (existing logger, `phone-` session prefix), 90-day prune applies | Transcript and audio file appear per test call |
+| ✅ 2.1 | `phone_audio.py` + `/test/ws` + `static/test.html`: the page sends mic audio, the server squeezes it to 8 kHz μ-law and back (so it sounds like a phone line), and plays the reply the same way. A `?caller=9000000001` URL parameter stands in for caller ID | You can hold a call from the browser; audio is clearly narrowband |
+| ✅ 2.2 | `call_pipeline.py`: phone profile (8 kHz in, 8 kHz out for Cartesia, Sarvam STT at 8 kHz or resampled to 16 kHz: **decide by testing both**, keep the one with fewer misheard words), greeting clip with the new wording pre-rendered through `greeting_cache.py` (new text, so a new cache entry), `X-Source: phone` | Greeting plays with no live TTS delay; a question gets a spoken answer in the same words the website bot would give |
+| ✅ 2.3 | Run the 12 questions from the "Test questions" tab through the browser phone test in English, Tamil, Tanglish | Substance matches typed chat; no "bro"/"anna"; replies phone-length |
+| ✅ (measured, not tuned) 2.4 | Phone turn-taking pass (VAD threshold, smart-turn wait, barge-in) with `phone_audio` noise/narrowband in the loop. Tune in `turn_taking.py` only through env-driven values so web is not affected | Checks 13 to 18 of the test list pass by browser; remaining tuning is marked "needs real phone" |
+| ✅ 2.5 | Logging to a phone folder (existing logger, `phone-` session prefix), 90-day prune applies | Transcript and audio file appear per test call |
+
+**Result of Phase 2 (done 2026-10-20):**
+
+- **2.1** `phone-agent/phone_audio.py` (`BrowserPhoneSerializer`: browser audio is squeezed to 8 kHz mu-law and back in both directions), `/test` page (`static/test.html`, mic via AudioWorklet, plays 8 kHz, drops queued audio on barge-in) and `/test/ws`. The test routes switch off with `ENABLE_TEST_PAGE=0`. **Not checked by a human:** nobody has yet held a call from the browser page with a real mic and headphones; only the scripted caller has used the socket. **You should try it:** start the services (below), open `http://127.0.0.1:8002/test`.
+- **2.2** `call_pipeline.py` builds the phone profile (8 kHz in/out, `X-Source: phone`, your greeting). The greeting is pre-rendered and cached (7.8 s). **8 kHz vs 16 kHz into Sarvam:** 27 shared English turns, word error 14.7% (8 kHz) vs 11.7% (16 kHz), exact matches 21 of 27 both; first audio median 1.45 s vs 1.72 s. A near tie on a small sample with a synthetic caller, so **8 kHz stays the default** (`PHONE_STT_RATE`); recheck on a real phone in 5.3. The caller number (`?caller=`) is accepted but unused until 3.1. `config.py` falls back to `voice-pipeline/.env` for any key missing from the root `.env`.
+- **2.3** Used `scenario_test.py`'s 35 scripted scenarios (English, Tamil, mid-call switches) plus its 10 Tanglish ones, run through the phone line (`scenario_test.py --url ws://127.0.0.1:8002 --path /test/ws`, new `--path` option). The "Test questions" tab from the vendor-comparison doc was not available to me. Results: no errors in the server log; first audio median 1.55 s English, 1.70 s Tamil; no reply over 70 words; "okay" ignored while the bot talks 4/4; pauses respected 4/4; Tamil and Tanglish replies in the right style. **Bug found and fixed:** two Tanglish turns heard as English got "Hey bro" replies. The no-"bro" rule now applies to every reply on a phone call (`rag-backend/main.py`), with a test; the two scenarios re-run clean.
+- **2.4 Measured, not tuned.** Barge-in on the phone line vs the website (same three `en-interrupt` scenarios): website 3/3 stopped, median 0.84 s; phone 2/3 stopped, 1.46 s (earlier phone runs: 3/4 at 1.0 s, 2/3 at 1.23 s). The miss is always the "Wait, actually tell me about placements instead" clip, whose words Sarvam never transcribed on the phone line. Both lines miss the 0.2 s target. A synthetic caller with no echo cannot show whether to change `BARGE_IN_SUSTAIN_SECS` or the VAD, so no timing was changed; **to tune on a real phone in step 5.3.**
+- **2.5** Each phone test call writes `transcript.json` and `audio.wav` under `voice-pipeline/logs/<date>/phone-test-<id>/` (the website's log folder, told apart by the `phone-` prefix; 54 sessions after the runs). The 90-day prune runs at phone-agent startup.
+- **Tests:** phone-agent 9, rag-backend 8, voice-pipeline 2, all passing.
+- **To run locally:** `rag-backend` on 8000 (`uvicorn main:app --port 8000`), phone agent on 8002 (`cd phone-agent; venv\Scripts\python -m uvicorn server:app --port 8002`).
 
 ### Phase 3: Records, transfer, end call (C, ~1 week)
 

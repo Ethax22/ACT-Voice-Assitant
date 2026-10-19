@@ -852,7 +852,9 @@ async def _build_full_messages(
                 else VOICE_FINAL_REMINDER + " " if voice else ""
             )
             + LANGUAGE_RULES[language]
-            + (NO_BRO_FINAL if language in ("ta", "ta_en") else "")
+            # On the phone for every style: speech recognition often hears Tanglish
+            # ("fees evlo bro") as English, and the English reply then said "bro".
+            + (NO_BRO_FINAL if phone or language in ("ta", "ta_en") else "")
             + (ACK_FINAL if kind == "ack" else "")
             + ("" if kind == "closing" else FACTS_RULE + _already_said_rule(messages)),
         },

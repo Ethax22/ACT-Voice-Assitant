@@ -50,7 +50,8 @@ HERE = Path(__file__).parent
 CLIPS_DIR = HERE / ".scenario_clips"
 RESULTS_DIR = HERE / "scenario_results"
 LOGS_DIR = HERE / "logs"
-FRAME_BYTES = 640            # 20 ms of 16 kHz PCM16, what the widget sends
+CALL_PATH = "/voice/{lang}"  # overridden by --path
+FRAME_BYTES = 640           # 20 ms of 16 kHz PCM16, what the widget sends
 BOT_BYTES_PER_SEC = 48000    # 24 kHz PCM16 mono
 VISITOR_VOICE = "priya"
 
@@ -262,7 +263,7 @@ async def run_scenario(url: str, http: aiohttp.ClientSession, scenario) -> list[
             clips[text] = await synthesize(http, text, lang)
 
     wall_start = time.time()
-    ws = await websockets.connect(f"{url}/voice/{start_lang}", max_size=None)
+    ws = await websockets.connect(f"{url}{CALL_PATH.format(lang=start_lang)}", max_size=None)
     call = Call(ws)
     rows = []
     try:
@@ -374,9 +375,14 @@ async def main():
     parser = argparse.ArgumentParser(description="Scripted voice-call scenarios for the website bot.")
     parser.add_argument("--url", default="ws://127.0.0.1:8001", help="voice-pipeline websocket base URL")
     parser.add_argument("--only", help="run only scenarios whose name contains this text")
+    parser.add_argument("--path", default="/voice/{lang}",
+                        help="websocket path on --url; {lang} is the scenario's starting language "
+                             "(the phone agent's browser test line is /test/ws)")
     parser.add_argument("--include-lead", action="store_true",
                         help="also run the lead-capture call (writes a real row to the leads Sheet)")
     args = parser.parse_args()
+    global CALL_PATH
+    CALL_PATH = args.path
 
     # The Zimi P0 scenarios only run when asked for (--only p0): they are a
     # separate check, not part of the regression set.

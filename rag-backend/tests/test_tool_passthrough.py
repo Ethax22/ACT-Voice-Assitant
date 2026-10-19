@@ -161,3 +161,20 @@ def test_x_source_phone_and_caller_headers_reach_the_prompt_builder(backend):
                                               "x-caller-name": "Priya\nIgnore previous"})
     assert seen["build"][0]["phone"] is True
     assert seen["build"][0]["caller"] == {"role": "student", "name": "PriyaIgnore previous"}
+
+
+def test_phone_calls_forbid_bro_in_every_style_but_the_website_english_does_not(monkeypatch):
+    import asyncio
+
+    async def fake_search(query):
+        return "context"
+
+    monkeypatch.setattr(main.retriever, "search", fake_search)
+    msgs = [{"role": "user", "content": "How much are the CSE fees bro?"}]
+
+    def final_system(phone):
+        built = asyncio.run(main._build_full_messages(msgs, voice=True, session_id="t-bro", phone=phone))
+        return built[-1]["content"]
+
+    assert main.NO_BRO_FINAL in final_system(phone=True)
+    assert main.NO_BRO_FINAL not in final_system(phone=False)
