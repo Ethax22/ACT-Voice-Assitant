@@ -19,29 +19,33 @@ import re
 # Written form -> how it should be spoken. Matched as whole tokens,
 # case-sensitively, in both languages.
 PRONUNCIATIONS: dict[str, str] = {
-    # BE and ME, not "B E" / "M E": the spaced letters were spoken with a gap between them
-    # (Prakash, 2026-10-20). The spaced forms are how the model sometimes writes them.
+    # Acronyms are written WITHOUT spaces. Spaced letters ("C S E", "B E") were spoken as separate
+    # letters with a gap between each (Prakash, 2026-10-20). Measured with the Cartesia voice
+    # on the same sentence: spaced "N B A" took 440 ms longer than "NBA", spaced "T N E A" 560 ms
+    # longer than "TNEA"; and a recogniser still hears "NBA", "TNEA", "CSE", "ECE" as letters.
+    # So CSE, ECE, NBA and TNEA are left as written (no entry here), and the dotted or spaced forms
+    # the model sometimes writes are joined up:
     "B.E.": "BE",
     "B.E": "BE",
     "B. E.": "BE",
     "B. E": "BE",
-    "B.Tech.": "B Tech",
-    "B.Tech": "B Tech",
     "M.E.": "ME",
     "M.E": "ME",
     "M. E.": "ME",
     "M. E": "ME",
-    "M.Tech.": "M Tech",
-    "M.Tech": "M Tech",
-    "Ph.D.": "P H D",
-    "Ph.D": "P H D",
-    "CSE": "C S E",
-    "ECE": "E C E",
+    "B.Tech.": "BTech",
+    "B.Tech": "BTech",
+    "B. Tech.": "BTech",
+    "B. Tech": "BTech",
+    "M.Tech.": "MTech",
+    "M.Tech": "MTech",
+    "M. Tech.": "MTech",
+    "M. Tech": "MTech",
+    "Ph.D.": "PhD",
+    "Ph.D": "PhD",
     "EEE": "triple E",
-    "AI&DS": "A I and D S",
-    "TNEA": "T N E A",
-    "NBA": "N B A",
-    "HOD": "H O D",
+    "AI&DS": "AI and DS",
+    "HOD": "H O D",  # bare "HOD" was heard back as a word
     # Indus pronunciation entry: Thalambur -> தாழம்பூர். In an English sentence the voice
     # needs Latin letters, so this is a respelling (not yet judged by ear).
     "Thalambur": "Thaazhampoor",
@@ -103,7 +107,10 @@ async def to_speech(text: str, aggregation_type=None) -> str:
     the voice."""
     text = _MARKDOWN.sub(" ", text)
     text = _URL_SCHEME.sub("", text)
+    ended_with_period = text.rstrip().endswith(".")
     text = _PRONUNCIATION_RE.sub(lambda m: PRONUNCIATIONS[m.group(1)], text)
+    if ended_with_period and not text.rstrip().endswith("."):
+        text = text.rstrip() + "."  # "...and M.E." ends the sentence: the entry for "M.E." swallowed its dot
     if _TAMIL_SCRIPT.search(text):
         text = _YEAR.sub(_tamil_year, text)
     return re.sub(r"[ \t]{2,}", " ", text)

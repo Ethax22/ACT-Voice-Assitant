@@ -88,6 +88,18 @@ BARGE_IN_REQUIRE_WORD = os.environ.get("BARGE_IN_REQUIRE_WORD", "1") != "0"
 # A transcript only counts if the local VAD heard speech this recently, so a
 # word the speech-to-text invents from noise the VAD rejected is ignored.
 VAD_RECENT_SECS = 2.5
+# A transcript of at least this many real words is accepted as an interruption even when the VAD has
+# not reported speech lately. The VAD only logs the start and end of speech, so for a sentence longer
+# than VAD_RECENT_SECS the transcript always looked "stale", and when the VAD flickered on the
+# phone line the caller's whole sentence was thrown away (2026-10-20). 0 = off (the website).
+BARGE_IN_TRUST_WORDS = int(os.environ.get("BARGE_IN_TRUST_WORDS", "0"))
+# With BARGE_IN_REQUIRE_WORD on, an interruption waits for the speech-to-text to return words,
+# which on the phone line took 2 to 3 s from the first sound (measured 2026-10-20: the caller
+# talked over the bot and it kept talking). If speech then goes on for this many seconds without
+# stopping, that is a person talking, so interrupt without waiting for words. 0 = off, the
+# website's behaviour; the phone agent sets it (phone-agent/config.py).
+TRACE = os.environ.get("TURN_TAKING_TRACE", "0") == "1"  # log every event the barge-in rule sees
+BARGE_IN_VAD_ONLY_SECS = float(os.environ.get("BARGE_IN_VAD_ONLY_SECS", "0"))
 
 # Single words that interrupt on their own ("wait", "stop"...). Anything else
 # needs at least two words.
@@ -159,6 +171,9 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
         await self._cancel_sustain_timer()
 
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+        if TRACE and isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame, VADUserStartedSpeakingFrame,
+                                        VADUserStoppedSpeakingFrame, InterimTranscriptionFrame, TranscriptionFrame)):
+            logger.info(f"[trace] {type(frame).__name__} busy={self._bot_busy()} text={getattr(frame, 'text', '')[:40]!r}")
         if isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
@@ -169,8 +184,16 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
             if not self._bot_busy():
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
+            logger.info(f"[interrupt] VAD heard speech while the bot is busy (words needed: {BARGE_IN_REQUIRE_WORD}, "
+                        f"sustained-speech timer: {BARGE_IN_VAD_ONLY_SECS or 'off'})")
             if BARGE_IN_REQUIRE_WORD:
-                # Bot is busy: wait for words (see _handle_transcript).
+                # Bot is busy: wait for words (see _handle_transcript), unless the speech simply
+                # keeps going (BARGE_IN_VAD_ONLY_SECS).
+                if BARGE_IN_VAD_ONLY_SECS > 0:
+                    await self._cancel_sustain_timer()
+                    self._sustain_task = self.task_manager.create_task(
+                        self._sustain_timer(BARGE_IN_VAD_ONLY_SECS), f"{self}::_sustain_timer"
+                    )
                 return ProcessFrameResult.CONTINUE
             if time.monotonic() - self._short_burst_at < BARGE_IN_RESUME_WINDOW_SECS:
                 logger.info("[interrupt] second burst of speech within 1 s of a short one — interrupting")
@@ -199,6 +222,8 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
         kind = "final" if isinstance(frame, TranscriptionFrame) else "interim"
         if self._bot_busy() and BARGE_IN_REQUIRE_WORD:
             heard_speech = time.monotonic() - self._last_vad_speech_at < VAD_RECENT_SECS
+            if BARGE_IN_TRUST_WORDS and len(_WORD.findall(text)) >= BARGE_IN_TRUST_WORDS and is_real_interruption(text):
+                heard_speech = True
             if not (heard_speech and is_real_interruption(text)):
                 if kind == "final":
                     why = "not real words" if heard_speech else "no speech heard by the VAD"
@@ -225,13 +250,14 @@ class BargeInUserTurnStartStrategy(BaseUserTurnStartStrategy):
         await self.trigger_user_turn_started()
         return ProcessFrameResult.STOP
 
-    async def _sustain_timer(self):
+    async def _sustain_timer(self, secs: float | None = None):
+        secs = secs or self._sustain_secs
         try:
-            await asyncio.sleep(self._sustain_secs)
+            await asyncio.sleep(secs)
         except asyncio.CancelledError:
             return
         self._sustain_task = None
-        logger.info(f"[interrupt] VAD speech kept going {self._sustain_secs}s over the bot — interrupting")
+        logger.info(f"[interrupt] VAD speech kept going {secs}s over the bot — interrupting")
         await self.trigger_user_turn_started()
 
     async def _cancel_sustain_timer(self):
@@ -248,6 +274,40 @@ def stt_silence_duration_ms(server_driven_default: int) -> int:
     if TURN_MODE != "local":
         return server_driven_default
     return int(os.environ.get("STT_SEGMENT_SILENCE_MS", "300"))
+
+
+def _vad_params():
+    """Silero VAD thresholds from the environment (VAD_CONFIDENCE, VAD_START_SECS, VAD_MIN_VOLUME);
+    None keeps Pipecat's defaults, which is what the website uses."""
+    from pipecat.audio.vad.vad_analyzer import VADParams
+
+    given = {k: float(os.environ[e]) for k, e in
+             (("confidence", "VAD_CONFIDENCE"), ("start_secs", "VAD_START_SECS"), ("min_volume", "VAD_MIN_VOLUME"))
+             if os.environ.get(e)}
+    return VADParams(**given) if given else None
+
+
+def _vad():
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+
+    return SileroVADAnalyzer(params=_vad_params())
+
+
+def _traced_vad():
+    """A Silero VAD that logs each change of state (TURN_TAKING_TRACE=1 only)."""
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+
+    class TracedVAD(SileroVADAnalyzer):
+        _seen = None
+
+        async def analyze_audio(self, buffer):
+            state = await super().analyze_audio(buffer)
+            if state != self._seen:
+                logger.info(f"[trace] VAD state -> {state.name}")
+                self._seen = state
+            return state
+
+    return TracedVAD(params=_vad_params())
 
 
 def build_user_aggregator_params(language: str):
@@ -281,7 +341,7 @@ def build_user_aggregator_params(language: str):
     logger.info(f"Turn-taking: local VAD, end-of-turn={stop_mode!r} ({language})")
 
     return LLMUserAggregatorParams(
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=_traced_vad() if TRACE else _vad(),
         user_turn_strategies=UserTurnStrategies(
             start=[BargeInUserTurnStartStrategy()], stop=[stop]
         ),
