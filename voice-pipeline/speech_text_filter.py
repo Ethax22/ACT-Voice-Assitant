@@ -36,6 +36,9 @@ PRONUNCIATIONS: dict[str, str] = {
     "TNEA": "T N E A",
     "NBA": "N B A",
     "HOD": "H O D",
+    # Indus pronunciation entry: Thalambur -> தாழம்பூர். In an English sentence the voice
+    # needs Latin letters, so this is a respelling (not yet judged by ear).
+    "Thalambur": "Thaazhampoor",
 }
 
 _PRONUNCIATION_RE = re.compile(

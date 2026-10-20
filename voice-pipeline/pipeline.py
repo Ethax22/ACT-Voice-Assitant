@@ -193,6 +193,7 @@ class PipelineProfile:
     # Called once when the pipeline is built, with the parts a call needs to hook into
     # (worker, llm, context, user_aggregator, transport, router).
     on_built: Any = None
+    audio_out_mixer: Any = None  # e.g. a looping background sound under the call (phone only)
 
 
 def build_pipeline(websocket, language: Language, session_id: str, profile: PipelineProfile | None = None):
@@ -258,6 +259,7 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
             # format like Twilio's — serializer=None would silently discard
             # every incoming message, so this needs a real one.
             serializer=profile.serializer or RawPCMSerializer(sample_rate=16000),
+            audio_out_mixer=profile.audio_out_mixer,
         ),
     )
 

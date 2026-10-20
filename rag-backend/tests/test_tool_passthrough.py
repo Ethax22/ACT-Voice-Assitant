@@ -206,7 +206,8 @@ def test_forced_tool_choice_for_the_three_turns_that_can_only_be_one_thing():
         c = main._forced_tool_choice(msgs, "t-fc", role, tools)
         return c.get("tool_choice", {}).get("function", {}).get("name") if c else None
 
-    ask_dob = [{"role": "assistant", "content": "And the student's date of birth?"},
+    ask_dob = [{"role": "user", "content": "my register number is 312823104004"},
+               {"role": "assistant", "content": "And the student's date of birth?"},
                {"role": "user", "content": "twelfth April two thousand five"}]
     assert choice(ask_dob, "student") == "get_student_report"
     assert choice(ask_dob, "faculty") is None and choice(ask_dob, None) is None
@@ -216,3 +217,99 @@ def test_forced_tool_choice_for_the_three_turns_that_can_only_be_one_thing():
     assert choice(offered) == "transfer_call"
     assert choice([{"role": "user", "content": "What are the hostel fees?"}]) is None
     assert main._forced_tool_choice([{"role": "user", "content": "talk to someone"}], "t-fc", None, None) == {}
+
+
+def test_the_phone_gets_ist_date_time_in_12_hour_form_and_office_hours():
+    from datetime import datetime, timezone, timedelta
+    ist = timezone(timedelta(hours=5, minutes=30))
+    assert main._now_ist_text(datetime(2026, 10, 20, 1, 28, tzinfo=ist)) == "Tuesday, 20 October 2026, 1:28 AM IST"
+    assert main._now_ist_text(datetime(2026, 10, 5, 13, 5, tzinfo=ist)) == "Monday, 5 October 2026, 1:05 PM IST"
+    assert main._now_ist_text(datetime(2026, 10, 5, 0, 0, tzinfo=ist)).endswith("12:00 AM IST")
+    block = main._phone_block({"role": "", "name": ""})
+    assert "8 AM to 5 PM, Monday to Saturday" in block and "CURRENT DATE AND TIME in India" in block
+
+
+def test_phone_lead_is_read_back_before_it_is_saved_and_the_website_saves_at_once():
+    said = [{"role": "user", "content": "My name is Ravi and my number is 9876543210"}]
+    # website: forced on the number turn, as before
+    assert main._should_force_lead_capture(said, "t-lead-w") is True
+    # phone: not forced on the number turn; this turn reads the number back instead
+    assert main._should_force_lead_capture(said, "t-lead-p", None, confirm_first=True) is False
+    assert main._phone_needs_readback(said, "t-lead-p", None) is True
+    readback = [*said, {"role": "assistant", "content": "That is 9 8 7 6 5 4 3 2 1 0. Is that right?"},
+                {"role": "user", "content": "yes that's right"}]
+    assert main._should_force_lead_capture(readback, "t-lead-p2", None, confirm_first=True) is True
+    assert main._phone_needs_readback(readback, "t-lead-p2", None) is False
+    # a wrong or short number is still handled by the existing invalid-number flow
+    bad = [{"role": "user", "content": "my number is 987654321"}]
+    assert main._should_force_lead_capture(bad, "t-lead-p3", None, confirm_first=True) is True
+    # records callers and the register-number question are never leads
+    assert main._phone_needs_readback(said, "t-lead-p4", "student") is False
+
+
+def test_only_phone_answers_get_the_lower_temperature():
+    assert main._temperature("phone") == {"temperature": main.PHONE_TEMPERATURE}
+    assert main._temperature("voice") == {} and main._temperature("chat") == {}
+
+
+def test_a_number_read_back_in_words_is_recognised_and_beats_a_transfer_offer():
+    assert main._spoken_phone("Let me confirm: nine eight seven six five four three two one zero. Is that correct?") == "9876543210"
+    assert main._spoken_phone("That is 9 8 7 6 5 4 3 2 1 0, right?") == "9876543210"
+    assert main._spoken_phone("one two three") is None
+    msgs = [{"role": "user", "content": "My name is Ravi, number 9876543210"},
+            {"role": "assistant", "content": "nine eight seven six five four three two one zero. Is that correct? "
+                                             "I can connect you with admissions after."},
+            {"role": "user", "content": "yes that's right"}]
+    tools = [{"type": "function", "function": {"name": "transfer_call"}}]
+    choice = main._forced_tool_choice(msgs, "t-words", None, tools, phone=True)
+    assert choice["tool_choice"]["function"]["name"] == "capture_lead"
+
+
+def test_forced_capture_lead_is_saved_even_when_sarvam_says_finish_stop(backend):
+    client, install, seen = backend
+    forced = ChatCompletion.model_validate({
+        "id": "x", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {
+            "role": "assistant", "content": None, "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "capture_lead", "arguments": LEAD_ARGS}}]}}]})
+    reply = ChatCompletion.model_validate({
+        "id": "y", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "Thanks Asha."}}]})
+    install([forced, reply])
+    body = client.post("/widget/chat", json={"messages": [{"role": "user", "content": "I am Asha, 9876543210"}],
+                                             "session_id": "t-stop"}).json()
+    assert body["reply"] == "Thanks Asha." and len(seen["saved"]) == 1
+
+
+def test_the_records_tool_is_forced_by_a_date_of_birth_after_a_register_number_only():
+    tools = [STUDENT_TOOL]
+    reg = {"role": "user", "content": "my register number is 312823104004"}
+
+    def forced(*msgs, role="student"):
+        return bool(main._forced_tool_choice(list(msgs), "t-dob", role, tools))
+
+    def user(text):
+        return {"role": "user", "content": text}
+
+    bot = lambda text: {"role": "assistant", "content": text}
+    assert forced(user("312825104001")) is False                      # a register number alone: the old bug
+    assert forced(reg, bot("And the date of birth?"), user("first January two thousand seven")) is True
+    assert forced(reg, bot("And the date of birth?"), user("12-04-2005")) is True
+    assert forced(reg, bot("And the date of birth?"), user("என்னோட டேட் ஆஃப் பர்த் வந்து ஏப்ரல் 12, 2005.")) is True  # Tamil month
+    assert forced(reg, bot("And the date of birth?"), user("I do not remember it")) is False
+    assert forced(user("12 April 2005")) is False                     # no register number said yet
+    assert forced(reg, bot("..."), user("fees for the 2025 batch")) is False   # a bare year is not a date of birth
+    # the wording of the bot's question does not matter (it often is not in English words in Tamil)
+    assert forced(reg, bot("உங்க பிறந்த தேதி சொல்லுங்க"), user("April 12 2005")) is True
+    # after the tool result came back the same message must not force the tool again
+    done = [reg, bot("And the date of birth?"), user("12-04-2005"),
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "c1"}]}, {"role": "tool", "content": "{}"}]
+    assert main._forced_tool_choice(done, "t-dob", "student", tools) == {}
+    assert forced(reg, bot("And the date of birth?"), user("12-04-2005"), role="faculty") is False
+
+
+def test_the_same_caller_tool_call_twice_in_one_turn_is_sent_once():
+    call = lambda i, args: {"id": i, "type": "function", "function": {"name": "get_student_report", "arguments": args}}
+    out = main._foreign_tool_calls([call("a", '{"x":1}'), call("b", '{"x":1}'), call("c", '{"x":2}'),
+                                    {"id": "d", "type": "function", "function": {"name": "capture_lead", "arguments": "{}"}}])
+    assert [c["id"] for c in out] == ["a", "c"]

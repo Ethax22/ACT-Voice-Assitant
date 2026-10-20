@@ -26,6 +26,7 @@ import re
 import time
 import uuid
 from collections import OrderedDict
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -122,6 +123,8 @@ CHAT_MODEL = "sarvam-105b"
 # provided", not "send null") — confirmed by comparing a raw curl payload
 # against the SDK call. extra_body bypasses that and sends the literal null.
 DISABLE_REASONING = {"reasoning_effort": None}
+# Phone answers run cooler than the website's (Indus ran "Compliant"): fewer wandering words, steadier tool calls.
+PHONE_TEMPERATURE = float(os.environ.get("PHONE_TEMPERATURE", "0.3"))
 BACKEND_AUTH_KEY = os.environ.get("RAG_BACKEND_AUTH_KEY")
 
 SYSTEM_PROMPT_TEMPLATE = """You are Agni AI, the friendly voice/chat assistant for
@@ -214,7 +217,16 @@ OWNED_TOOLS = {"capture_lead"}
 
 
 def _foreign_tool_calls(calls: list[dict]) -> list[dict]:
-    return [c for c in calls if (c.get("function") or {}).get("name") not in OWNED_TOOLS]
+    """The caller's tool calls, each distinct call once: the model sometimes sends the same
+    records lookup twice in one turn, and each one would count as a verification try."""
+    seen, out = set(), []
+    for c in calls:
+        fn = c.get("function") or {}
+        key = (fn.get("name"), fn.get("arguments"))
+        if fn.get("name") not in OWNED_TOOLS and key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
 
 
 def _tool_call_sse(calls: list[dict]):
@@ -229,6 +241,10 @@ def _tool_call_sse(calls: list[dict]):
 
 
 _HEADER_TEXT = re.compile(r"[^\w .'-]")
+
+
+def _temperature(source: str) -> dict:
+    return {"temperature": PHONE_TEMPERATURE} if source == "phone" else {}
 
 
 def _caller_from_headers(request: Request) -> dict:
@@ -262,7 +278,8 @@ _ASKED_FOR_RECORD_DETAIL = re.compile(r"register number|date of birth|\bdob\b", 
 
 
 def _should_force_lead_capture(
-    messages: list[dict], session_id: str | None, caller_role: str | None = None
+    messages: list[dict], session_id: str | None, caller_role: str | None = None,
+    confirm_first: bool = False,
 ) -> bool:
     """True when the visitor's latest message contains a phone number and this
     conversation has no lead saved for it yet.
@@ -287,25 +304,112 @@ def _should_force_lead_capture(
     latest = next(
         (m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), ""
     )
+    if confirm_first:
+        # Phone: speech recognition can mishear a digit, so the number is read back
+        # first (see _phone_needs_readback) and the lead is saved on the caller's yes.
+        phone = _spoken_phone(last_reply) if isinstance(last_reply, str) else None
+        if phone and len(latest.split()) <= 5 and _YES.search(latest):
+            return not lead_already_captured(session_id, phone)
     match = _PHONE_RUN.search(latest)
     if not match:
         return False
     phone = normalize_indian_mobile(match.group(0))
+    if confirm_first and phone:
+        return False  # a valid number: read it back before saving
     return not (phone and lead_already_captured(session_id, phone))
+
+
+_DIGIT_WORDS = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+                "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9"}
+_DIGIT_WORD_RUN = re.compile(r"(?:\b(?:" + "|".join(_DIGIT_WORDS) + r")\b[\s,.\-]*){8,}", re.I)
+
+
+def _spoken_phone(text: str) -> str | None:
+    """A valid 10-digit mobile number in `text`, written as digits ("9 8 7 6...") or as
+    digit words ("nine eight seven..."), which is how the model reads one back."""
+    match = _PHONE_RUN.search(text)
+    if match:
+        return normalize_indian_mobile(match.group(0))
+    match = _DIGIT_WORD_RUN.search(text)
+    if match:
+        return normalize_indian_mobile("".join(_DIGIT_WORDS[w.lower()] for w in re.findall(r"[A-Za-z]+", match.group(0))))
+    return None
+
+
+NO_LOOKUP_YET = (
+    " No records lookup has been made yet on this call. Do not say that details could not be "
+    "verified or that anything failed; ask for what is still missing."
+)
+READBACK_FINAL = (
+    " The caller just gave a phone number. Read it back digit by digit with single spaces "
+    "between the digits, and ask if it is right. Say nothing else in this reply, and do not say it has been saved or noted yet."
+)
+
+
+def _phone_needs_readback(messages: list[dict], session_id: str | None, caller_role: str | None) -> bool:
+    """True on a phone call when the caller's latest message holds a valid number that
+    has not been saved: this turn reads it back instead of saving it."""
+    if caller_role in RECORDS_ROLES:
+        return False
+    last_reply = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "assistant"), "")
+    if isinstance(last_reply, str) and _ASKED_FOR_RECORD_DETAIL.search(last_reply):
+        return False
+    latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+    match = _PHONE_RUN.search(latest)
+    phone = normalize_indian_mobile(match.group(0)) if match else None
+    return bool(phone) and not lead_already_captured(session_id, phone)
 
 
 _WANTS_PERSON = re.compile(
     r"\b(talk|speak|connect|transfer)\b.{0,25}\b(person|human|someone|somebody|staff|agent|representative|"
     r"reception|admissions?|placement|office|team)\b|\b(real|live) person\b|\bhuman\b", re.I)
-_MONTH_OR_DIGIT = re.compile(
-    r"\d|january|february|march|april|may|june|july|august|september|october|november|december", re.I)
+_TAMIL_MONTHS = "ஜனவரி|பிப்ரவரி|மார்ச்|ஏப்ரல்|மே|ஜூன்|ஜூலை|ஆகஸ்ட்|செப்டம்பர்|அக்டோபர்|நவம்பர்|டிசம்பர்"
+_DATE_LIKE = re.compile(
+    r"january|february|march|april|may|june|july|august|september|october|november|december|" + _TAMIL_MONTHS
+    + r"|\b\d{1,2}\s*[-/.]\s*\d{1,2}\s*[-/.]\s*\d{2,4}\b", re.I)
 _DOB_ASKED = re.compile(r"date of birth|\bdob\b", re.I)
+_REG_ASKED = re.compile(r"register number|reg(?:ister)?\.? ?(?:no|number)", re.I)
+_SENTENCES = re.compile(r"(?<=[.?!])\s+")
+_LONG_NUMBER = re.compile(r"(?:\d\D*){8,}")  # a register number: eight or more digits
+
+
+def _no_reply_since_last_user_message(messages: list[dict]) -> bool:
+    """True when the caller's latest message has not been answered or acted on yet. Tool
+    forcing must only fire then, or it would repeat after the tool result came back."""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            return True
+        if m.get("role") in ("assistant", "tool"):
+            return False
+    return False
+
+
+def _gave_register_number_and_dob(messages: list[dict], latest: str) -> bool:
+    """The caller has said a register number (in any message) and the latest message holds a
+    date of birth. Does not depend on how the bot phrased its question, which in Tamil it
+    often does not in English words: asking by wording missed a real call (2026-10-20)."""
+    said = " ".join(m.get("content") or "" for m in messages if m.get("role") == "user" and isinstance(m.get("content"), str))
+    return bool(_DATE_LIKE.search(latest)) and bool(_LONG_NUMBER.search(said))
+
+
+def _answers_a_dob_question(last_reply: str, latest: str) -> bool:
+    """The caller's message answers a question that asked for the date of birth.
+    Looser than that wasted a student's three tries (2026-10-20): the register number
+    was forced into the tool before any date of birth had been said."""
+    questions = [x for x in _SENTENCES.split(last_reply) if x.strip().endswith("?")]
+    question = questions[-1] if questions else ""
+    if not _DOB_ASKED.search(question) or not _DATE_LIKE.search(latest):
+        return False
+    return not _REG_ASKED.search(question) or bool(re.search(r"(?:\d\D*){8,}", latest))
+
+
 _YES = re.compile(r"^\W*(yes|yeah|yep|sure|ok|okay|please|haan|aama|sari|seri|ஆமா|ஆம்|சரி)(?:\W|$)", re.I)
 _TRANSFER_OFFERED = re.compile(r"transfer|connect you|connect your call", re.I)
 
 
 def _forced_tool_choice(
-    messages: list[dict], session_id: str | None, caller_role: str | None, client_tools: list[dict] | None
+    messages: list[dict], session_id: str | None, caller_role: str | None, client_tools: list[dict] | None,
+    phone: bool = False,
 ) -> dict:
     """The tool_choice for this turn, or {} to let the model decide.
 
@@ -314,7 +418,7 @@ def _forced_tool_choice(
     get_student_report after the date of birth and then claimed the number was
     "locked"; it offered to transfer instead of calling transfer_call). Code decides
     in the three cases where the turn can only be one thing, as with capture_lead."""
-    if _should_force_lead_capture(messages, session_id, caller_role):
+    if _should_force_lead_capture(messages, session_id, caller_role, confirm_first=phone):
         return {"tool_choice": FORCE_CAPTURE_LEAD}
     names = {(t.get("function") or {}).get("name") for t in client_tools or []}
     latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
@@ -325,10 +429,11 @@ def _forced_tool_choice(
         return {"tool_choice": {"type": "function", "function": {"name": name}}}
 
     # The date of birth is the last thing asked for, so the answer to it completes the request.
-    if ("get_student_report" in names and caller_role in ("student", "parent")
-            and _DOB_ASKED.search(last_reply) and _MONTH_OR_DIGIT.search(latest)):
+    unanswered = _no_reply_since_last_user_message(messages)
+    if ("get_student_report" in names and caller_role in ("student", "parent") and unanswered
+            and _gave_register_number_and_dob(messages, latest)):
         return force("get_student_report")
-    if "transfer_call" in names and (
+    if "transfer_call" in names and unanswered and (
         _WANTS_PERSON.search(latest)
         or (len(latest.split()) <= 5 and _YES.search(latest) and _TRANSFER_OFFERED.search(last_reply))
     ):
@@ -381,6 +486,8 @@ async def _resolve_tool_calls(
                 )
                 result = (
                     "Lead recorded for admissions follow-up. Thank the visitor warmly."
+                    + (" Do not transfer the call and do not call end_call unless the caller has asked for a person or to finish."
+                       if source == "phone" else "")
                     if saved
                     else "Lead noted (Sheets write failed, but don't mention that to the "
                     "visitor — just thank them warmly as usual)."
@@ -836,7 +943,7 @@ PHONE CALL RULES (this is a live phone call to the college):
 PHONE_RECORDS = {
     "student": """
 CALLER RECORDS: the caller was identified from their phone number as a registered {role}{name}. Never ask them to confirm that or mention how you know it.
-- Marks or attendance: ask for the student's register number first, one question at a time. If you do not yet know whether they want marks, attendance or both, ask that next. Ask for the student's date of birth LAST, then call get_student_report with it in DD-MM-YYYY. Say a very short lead-in such as "One moment." before the call.
+- Marks or attendance: ask for the student's register number first, one question at a time. When they give it, read it back digit by digit with single spaces and ask if it is right (speech recognition can mishear a digit); if not, take the new number and read it back again. Then, if you do not yet know whether they want marks, attendance or both, ask that. Ask for the student's date of birth LAST, then call get_student_report with it as DD-MM-YYYY, day first (\"April 12, 2005\" is 12-04-2005, never 04-12-2005). Never call get_student_report before the caller has actually said the date of birth, and never make one up. Say a very short lead-in such as "One moment." before the call.
 - Say the tool's `speech` as it is. Never add, change, round or guess any number or subject name.
 - Only the tool decides whether details are right. Every time the caller gives a register number or date of birth, call get_student_report again, even right after a failure; never say details could not be verified unless the tool has just returned that. If the status is verification_failed, say so once and let them try again; after a second failure offer the reception. Never say which detail was wrong and never say whether a register number exists. If the status is locked or error, say the speech and offer the reception.
 - Never say a register number, date of birth or marks to anyone the tool has not verified, and never discuss another person's record.""",
@@ -851,6 +958,22 @@ PHONE_RECORDS_UNKNOWN = """
 CALLER RECORDS: this caller is not a registered student, parent or faculty member. If they ask about marks or attendance, say politely that this is only available to registered students and parents and offer to connect them to the reception. Do not ask for a register number."""
 
 
+_IST = timezone(timedelta(hours=5, minutes=30))
+OFFICE_HOURS = "8 AM to 5 PM, Monday to Saturday (closed on Sunday)"
+
+
+def _now_ist_text(now: datetime | None = None) -> str:
+    """e.g. "Tuesday, 20 October 2026, 1:28 AM IST": 12-hour clock, India time."""
+    now = now or datetime.now(_IST)
+    return f"{now:%A}, {now.day} {now:%B %Y}, {now.hour % 12 or 12}:{now:%M} {now:%p} IST"
+
+
+def _phone_facts(now: datetime | None = None) -> str:
+    return (f"\nCURRENT DATE AND TIME in India: {_now_ist_text(now)}. College office hours: {OFFICE_HOURS}. "
+            "Use these to say whether the office is open now or when it opens next (before 8 AM on a working day it opens today at 8 AM); "
+            "do not read out the date or time unless the caller asks.")
+
+
 def _phone_block(caller: dict | None) -> str:
     """The phone rules, with the records section that fits who is calling (from the
     phone agent's X-Caller-Role / X-Caller-Name headers)."""
@@ -858,7 +981,7 @@ def _phone_block(caller: dict | None) -> str:
     name = (caller or {}).get("name", "")
     records = PHONE_RECORDS.get(role)
     records = records.format(role=role, name=f", first name {name}" if name else "") if records else PHONE_RECORDS_UNKNOWN
-    return PHONE_RULES + records
+    return PHONE_RULES + _phone_facts() + records
 
 
 async def _build_full_messages(
@@ -941,6 +1064,10 @@ async def _build_full_messages(
             # On the phone for every style: speech recognition often hears Tanglish
             # ("fees evlo bro") as English, and the English reply then said "bro".
             + (NO_BRO_FINAL if phone or language in ("ta", "ta_en") else "")
+            + (NO_LOOKUP_YET if phone and (caller or {}).get("role") in ("student", "parent")
+               and not any(m.get("role") == "tool" for m in messages) else "")
+            + (READBACK_FINAL if phone and _phone_needs_readback(
+                messages, session_id, (caller or {}).get("role")) else "")
             + (ACK_FINAL if kind == "ack" else "")
             + ("" if kind == "closing" else FACTS_RULE + _already_said_rule(messages)),
         },
@@ -973,11 +1100,16 @@ async def _generate_reply(
         model=CHAT_MODEL,
         messages=full_messages,
         tools=all_tools,
-        **_forced_tool_choice(messages, session_id, (caller or {}).get("role"), client_tools),
+        **_forced_tool_choice(messages, session_id, (caller or {}).get("role"), client_tools,
+                                    phone=(source == "phone")),
+        **_temperature(source),
         extra_body=DISABLE_REASONING,
     )
     choice = response.choices[0]
-    if choice.finish_reason == "tool_calls":
+    # Sarvam reports finish_reason "stop" (not "tool_calls") when tool_choice forced the call,
+    # so look at the calls themselves. Found 2026-10-20: a forced capture_lead came back to
+    # the client unsaved on this non-streaming path (the website's typed chat).
+    if choice.message.tool_calls:
         calls = choice.message.model_dump().get("tool_calls") or []
         foreign = _foreign_tool_calls(calls)
         if foreign:
@@ -1000,8 +1132,14 @@ async def _generate_reply(
             # message history contains tool/tool_calls entries, not just the
             # call that first offers them.
             tools=all_tools,
+            **_temperature(source),
             extra_body=DISABLE_REASONING,
         )
+        again = response.choices[0].message
+        if again.tool_calls:
+            # The model may repeat capture_lead or ask for a caller tool after the lead is saved:
+            # the caller only ever sees its own tools.
+            again.tool_calls = [c for c in again.tool_calls if c.function.name not in OWNED_TOOLS] or None
     return response
 
 
@@ -1030,7 +1168,7 @@ async def _stream_reply_sse(
     all_tools = [CAPTURE_LEAD_TOOL, *(client_tools or [])]
     current_messages = full_messages
 
-    for round_no in range(2):  # at most one tool-resolution round-trip
+    for round_no in range(3):  # a forced lead, then the model's reply (or a repeat call), then a last reply
         t_round = time.perf_counter()
         stream = await chat_client.chat.completions.create(
             model=CHAT_MODEL,
@@ -1039,8 +1177,10 @@ async def _stream_reply_sse(
             tools=all_tools,
             # First round only: the follow-up round (after the tool result) must
             # be free to answer in words.
-            **(_forced_tool_choice(messages, session_id, (caller or {}).get("role"), client_tools)
+            **(_forced_tool_choice(messages, session_id, (caller or {}).get("role"), client_tools,
+                                   phone=(source == "phone"))
                if round_no == 0 else {}),
+            **_temperature(source),
             extra_body=DISABLE_REASONING,
         )
         tool_calls: dict[int, dict] = {}

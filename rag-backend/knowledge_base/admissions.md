@@ -49,7 +49,7 @@ for medical leave.
 - Hotline: 044-67409444 / 044-67409445; office 044-49972901/02/00
 - Mobile/WhatsApp: +91 81221 24081, +91 94450 24081, +91 93612 94593
 - Email: admission@act.edu.in
-- Office hours: 8 AM to 5 PM
+- Office hours: 8 AM to 5 PM, Monday to Saturday
 
 ## Important Note for the Assistant
 Cutoff marks, exact fees, seat intake and deadlines are not published and change

@@ -1,8 +1,8 @@
 # Calling Agent — Implementation Plan (own pipeline, Cartesia voice)
 
 **Written:** 2026-10-19. **Companion to:** `Calling_Agent_DIY_Build_Plan.md` (the what and why; this file is the how and in what order).
-**Status (2026-10-20):** Phases 1, 2 and 3 complete, with the gaps listed in their Result notes (phone barge-in not tuned; the parent and Tamil records flows and the real Vobiz transfer not yet tested). Phase 4 not started. Completed steps are marked ✅ in the tables below; the "Result" notes under each phase say what was actually done and checked.
-**Commit state:** Phases 1 and 2 are committed locally (`ACT-Voice-Assistant` `545cb04`, `ACT-Calling-Agent` `ad22b4d`; `ACT-Calling-Agent` is pushed only up to `1c17eaf`). Phase 3 is in the working trees, **uncommitted**.
+**Status (2026-10-20):** Phases 1, 2 and 3 complete, and the inbound follow-ups (date/time, leads on both paths, temperature, pronunciation, background sound) done; open: your hands-on browser test, parent/Tamil records tests, a native check of the Tamil lines. Phase 4 not started.
+**Commit state:** Phases 1 to 3 are committed locally (`ACT-Voice-Assistant` `2786d5a`, `ACT-Calling-Agent` `fea80f4`; `ACT-Calling-Agent` is pushed only up to `1c17eaf`). The inbound follow-ups of 2026-10-20 are **uncommitted**.
 
 ## 0. Decisions made (Prakash, 2026-10-19)
 
@@ -16,6 +16,8 @@
 | Vobiz account | Prakash's name for development. For launch: a **new** account and a **new** number in the college's name (no transfer). |
 | Hosting | Azure (Central India) for development; the college's own host at launch. Everything address-like lives in `.env`. |
 | Greeting | "Welcome to Agni College of Technology, this is Agni AI. This call may be recorded to help us serve you better. How can I help you today?" |
+| Facts and settings (2026-10-20) | Office hours 8 AM to 5 PM, Monday to Saturday. The model is given the current date and time (IST, 12-hour). Speed stays at the voice default. Phone temperature set (0.3). Background sound built. Pronunciation entry from the Indus screenshot added. Transfer and interruption tuning wait for the real phone |
+| Lead capture (2026-10-20) | Must work on both the website chat and the phone agent |
 | ERP data | Use the existing fake contacts and marks/attendance until conversation and voice are tested; load real data last. |
 | Where the work happens | In this session, with `C:\ACT-Calling-Agent` added as a working directory (one approval). |
 
@@ -135,6 +137,46 @@ Legend: **P** = Prakash does it, **C** = Claude does it, **P+C** = together. "Ch
 - **3.4 Transfer.** `transfer_call(department, line)`: looks the number up in erp-lookup `/route` (reception if unclear; if no number, the model apologises and offers a callback), says the line, sends the page a `transfer` message, ends the call. **Checked by voice:** "speak to someone in admissions" gave the admissions number, one spoken line and a closed call. **Not real yet:** nothing is dialled. For Vobiz (Phase 5) the plan is to carry the call to `control.transfer_to` when the call ends, instead of hanging up.
 - **3.5 Post-call record.** `post_call.py`: Sarvam 105B fills the ten Indus fields from the saved transcript; the record is written beside the transcript (`call_record.json`, caller number masked to the last four digits) and appended to the `Calls` tab (created with a header on first use). Four test calls produced sensible records. **One row was written to the real Calls sheet** to prove the write: session `phone-test-b1b2e…`, delete it if you do not want it. Labels are model judgements, not checked against hand-labelled calls.
 - **Tests:** phone-agent 19, rag-backend 11, voice-pipeline 2, all passing. **Notes for you:** test caller 9000000001 was locked out for an hour by the lockout test (use 9000000003 for student flows); `live/` scripts are manual checks, not part of pytest.
+
+### Inbound readiness audit (2026-10-20), against the parity table in `Calling_Agent_DIY_Build_Plan.md` §4a
+
+Local test guide: `C:\ACT-Calling-Agent\LOCAL_TEST.md`; start everything with `start-local.ps1`.
+
+| Indus capability | State |
+|---|---|
+| Greeting with recording notice | ✅ Done (English; pre-rendered clip) |
+| Persona, speaking style, languages, numbers, closing | ✅ Done in `rag-backend` (shared with the website, plus the phone block) |
+| Facts variables (office hours, admissions phone, current date) | ✅ Done 2026-10-20. Office hours are **8 AM to 5 PM, Monday to Saturday** (knowledge base fixed). The phone prompt now carries the current date and time in India, 12-hour clock, IST, refreshed on every turn. Phone numbers come from the knowledge base |
+| Answers from the shared brain (`get_act_answer`) | ✅ Done |
+| Lead capture | ✅ Done 2026-10-20 on both paths, checked live: website chat saved a row (`source=chat`); phone reads the number back, saves on the caller's yes (`source=phone`), then thanks. Fixed two bugs on the way (see Result below) |
+| Caller identification | ✅ Done (browser: by the number you type; Vobiz: its `From` field in Phase 5) |
+| Student report, class summary | ✅ Done and tested (student, faculty, unknown, by voice); parent and Tamil flows **not tested** |
+| Transfer to a person | 🟡 Done up to the number lookup and the spoken line; real transfer tested on the real phone in Phase 5 (your ruling) |
+| End call | ✅ Done |
+| Language switching, starting English | ✅ Done (same router as the website); Tanglish and Tamil answers passed the scripted runs |
+| Let callers interrupt, eagerness, volume threshold | 🟡 Working; to be tuned on the real phone in Phase 5 (your ruling) |
+| Voice | 🟡 Same Cartesia voice as the website at its default speed (your ruling: defaults for now). **Not judged by ear** on the phone line |
+| Pronunciation dictionary | ✅ The one Indus entry (Thalambur, Tamil) is in as a Latin respelling, `Thaazhampoor`, for English sentences; Tamil sentences already use the Tamil script. **Not judged by ear** |
+| "Output numbers in Indic" | ✅ Decided 2026-10-20: dropped. Phone numbers (spaced digits in the prompt) and Tamil years (the text filter) are already handled; revisit only if a number is heard wrongly in Tamil |
+| Model temperature ("Compliant") | ✅ Phone answers use **0.3** (`PHONE_TEMPERATURE`); the website is unchanged |
+| Background sound | ✅ Built 2026-10-20: a quiet office murmur under the whole call, about 26 dB below speech. It is **synthetic noise** (no recording was available); drop in your own 8 kHz mono WAV with `PHONE_BACKGROUND_FILE`, or `PHONE_BACKGROUND=off` |
+| Quiet-caller nudges, hang up | ✅ Done; Tamil lines unreviewed by a native speaker |
+| Maximum call length | ✅ Done |
+| Call forwarding | 🟡 Phase 5 (real transfer via Vobiz) |
+| Post-call outputs | ✅ Done; labels not validated; one test row is in the Calls sheet |
+| Monitor calls | ✅ Transcript, audio and record per call, 90-day prune; no viewer screen |
+| Automated tests | 🟡 Scripted voice runs, live typed dialogs and unit tests; the 24-check list was not available to me |
+
+**Left before the inbound agent is done locally:** (1) your hands-on call with the browser page; (2) parent and Tamil records tests (I can run these); (3) a native speaker's check of the Tamil lines. Items for Phase 5 (real line): transfer, barge-in tuning, 8 kHz vs 16 kHz, the voice by ear.
+
+**Result of the inbound follow-ups (2026-10-20):**
+
+- **Date, time, office hours, temperature.** `rag-backend`: phone prompt gets "CURRENT DATE AND TIME in India: Tuesday, 20 October 2026, 1:28 AM IST" and the office hours on every turn; phone answers run at temperature 0.3. Checked live: asked at 2 AM whether the office is open, it said closed and that it opens today at 8 AM. `admissions.md` now says 8 AM to 5 PM, Monday to Saturday (this also changes what the website bot says).
+- **Lead capture, both paths.** Website: a forced `capture_lead` on the non-streaming chat path was never saved when Sarvam answered with `finish_reason: stop` (**bug found, fixed**; the widget's typed chat uses that path). Phone: the number is read back (digits or digit words) and saved when the caller says yes; saving on the number turn was dropped because speech recognition can mishear a digit. Checked live with real rows: one `source=chat`, two `source=phone` (**three test rows are in the leads Sheet, named "Local ... Test Delete": please delete them**). After a saved lead the model no longer transfers the call unless asked.
+- **Bug found and fixed in my own Phase 3 forcing.** The records tool was forced as soon as the caller said a register number (the bot's first reply had mentioned "date of birth"), so it ran with no date of birth, failed, and burned the caller's three tries (this is why the test students locked). It now fires only when the caller answers a question that asked for the date of birth. Test callers' failed/locked audit rows were cleared in the local `erp.db` (fake numbers 9000000001 to 9000000005 only).
+- **Background sound.** `phone-agent/background_sound.py` plus an output mixer hook in `PipelineProfile`. Measured on the browser line: ambience is steady during silence at about 5% of speech level (RMS 394 vs 7437). The scripted voice harness needs `PHONE_BACKGROUND=off` (it detects silence by gaps in audio). **Switched off on 2026-10-20 at your request** (`PHONE_BACKGROUND=off` in the root `.env`); delete that line or set `quiet_office` to turn it back on.
+- **Your first hands-on test (Tamil attendance call, 2026-10-20, read from its transcript) and what it showed.** Three faults, all fixed: (1) speech recognition heard the register number wrong (an 8 as a 1) and nothing checked it, so the phone prompt now has the bot **read the register number back and ask if it is right** before asking for the date of birth; (2) the model called the records tool with a date of birth it had **made up**, which counted as a failed try, so the phone agent now **refuses the call** unless the caller has actually said a register number and a date of birth (`tools.missing_record_detail`); (3) after you said "April 12, 2005" the tool was **never called** (the forcing only fired when the bot's question contained English words, which the Tamil reply did not), so the tool is now forced whenever the caller has said a register number and then says a date of birth (English or Tamil month names, or a numeric date), and only when that message has not been answered yet. A bare year no longer counts as a date of birth. Two more faults turned up while re-running it: (4) even with the tool called, the model turned "April 12, 2005" into **04-12-2005** (month first), which fails verification, so the phone agent now takes the date of birth **from the caller's own words, day first** (English and Tamil month names, numeric dates) and only falls back to the model's argument when it cannot read one; the prompt and tool description also say day first; (5) the model sometimes sent the **same lookup twice in one turn**, burning two tries, so identical simultaneous calls are now sent once. Also: until a lookup has actually been made, the model is told not to say anything failed (it had said "details could not be verified" before any lookup). **Re-run typed after the fixes:** Tamil attendance (read-back, date of birth, 90% attendance spoken), parent attendance, student marks; the three-wrong-tries lockout still works. Not yet re-run by voice.
+- **Tests:** rag-backend 18, phone-agent 23, voice-pipeline 2, all passing.
 
 ### Phase 4: Azure deployment (P runs, C writes the steps, ~2 days)
 
