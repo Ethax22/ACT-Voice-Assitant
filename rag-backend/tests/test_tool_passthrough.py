@@ -313,3 +313,15 @@ def test_the_same_caller_tool_call_twice_in_one_turn_is_sent_once():
     out = main._foreign_tool_calls([call("a", '{"x":1}'), call("b", '{"x":1}'), call("c", '{"x":2}'),
                                     {"id": "d", "type": "function", "function": {"name": "capture_lead", "arguments": "{}"}}])
     assert [c["id"] for c in out] == ["a", "c"]
+
+
+def test_register_number_and_phone_number_spoken_as_words_are_understood():
+    tools = [STUDENT_TOOL]
+    reg = {"role": "user", "content": "My register number is three one two eight two three one zero four double zero four."}
+    dob = {"role": "user", "content": "My date of birth is twelve April two thousand five."}
+    assert main._forced_tool_choice([reg, {"role": "assistant", "content": "And the date of birth?"}, dob],
+                                    "t-words2", "student", tools) != {}
+    said = [{"role": "user", "content": "My name is Ravi and my number is nine eight seven six five four three two one zero"}]
+    assert main._should_force_lead_capture(said, "t-words3") is True
+    assert main._should_force_lead_capture(said, "t-words4", None, confirm_first=True) is False
+    assert main._phone_needs_readback(said, "t-words4", None) is True

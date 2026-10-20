@@ -266,9 +266,13 @@ class ConversationRouter(FrameProcessor):
         initial_language: Language,
         callbacks: ConversationRouterCallbacks,
         trace=None,
+        update_stt: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        # False when the recogniser picks the language itself ("auto"): a switch then only
+        # changes the reply style, and the recogniser is left free to hear either language.
+        self._update_stt = update_stt
         self._language: Language = initial_language
         self._style: Style = initial_language
         self._tts_language = STYLE_TTS_LANGUAGE[self._style]
@@ -485,10 +489,11 @@ class ConversationRouter(FrameProcessor):
         # STT is upstream of this processor in the pipeline (transport.input
         # -> stt -> [this router] -> user_aggregator -> ...), so reaching it
         # means pushing upstream; TTS and the LLM are downstream.
-        await self.push_frame(
-            STTUpdateSettingsFrame(delta=STTSettings(language=LANGUAGE_CODES[target])),
-            FrameDirection.UPSTREAM,
-        )
+        if self._update_stt:
+            await self.push_frame(
+                STTUpdateSettingsFrame(delta=STTSettings(language=LANGUAGE_CODES[target])),
+                FrameDirection.UPSTREAM,
+            )
         # The reply style follows the language the call was just found to be
         # in: Tamil from an English style, English from either Tamil style.
         # A Tanglish call that is detected as Tamil stays Tanglish.

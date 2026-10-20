@@ -194,6 +194,7 @@ class PipelineProfile:
     # (worker, llm, context, user_aggregator, transport, router).
     on_built: Any = None
     audio_out_mixer: Any = None  # e.g. a looping background sound under the call (phone only)
+    stt_language_code: str | None = None  # None: the call's language (en-IN / ta-IN); "auto" lets Sarvam pick
 
 
 def build_pipeline(websocket, language: Language, session_id: str, profile: PipelineProfile | None = None):
@@ -237,7 +238,7 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
     sarvam_api_key = os.environ["SARVAM_API_KEY"]
     rag_backend_public_url = os.environ["RAG_BACKEND_PUBLIC_URL"].rstrip("/")
     rag_backend_auth_key = os.environ.get("RAG_BACKEND_AUTH_KEY", "")
-    language_code = LANGUAGE_CODES[language]
+    language_code = profile.stt_language_code or LANGUAGE_CODES[language]
 
     transport = FastAPIWebsocketTransport(
         websocket,
@@ -360,6 +361,7 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
         initial_language=language,
         callbacks=ConversationRouterCallbacks(persona_prompts=PERSONA_PROMPTS),
         trace=turn_trace,
+        update_stt=profile.stt_language_code is None,
     )
 
     # Phase 10 — audio logging. Placed after transport.output() (not

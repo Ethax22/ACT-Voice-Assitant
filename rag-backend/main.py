@@ -40,6 +40,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from language_style import detect_style
+from spoken_numbers import normalize_spoken_numbers
 from retriever import retriever
 from leads import normalize_indian_mobile, save_lead
 from conversation_logger import log_turn, prune_old_logs
@@ -310,7 +311,7 @@ def _should_force_lead_capture(
         phone = _spoken_phone(last_reply) if isinstance(last_reply, str) else None
         if phone and len(latest.split()) <= 5 and _YES.search(latest):
             return not lead_already_captured(session_id, phone)
-    match = _PHONE_RUN.search(latest)
+    match = _PHONE_RUN.search(normalize_spoken_numbers(latest))
     if not match:
         return False
     phone = normalize_indian_mobile(match.group(0))
@@ -355,7 +356,7 @@ def _phone_needs_readback(messages: list[dict], session_id: str | None, caller_r
     if isinstance(last_reply, str) and _ASKED_FOR_RECORD_DETAIL.search(last_reply):
         return False
     latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
-    match = _PHONE_RUN.search(latest)
+    match = _PHONE_RUN.search(normalize_spoken_numbers(latest))
     phone = normalize_indian_mobile(match.group(0)) if match else None
     return bool(phone) and not lead_already_captured(session_id, phone)
 
@@ -389,7 +390,8 @@ def _gave_register_number_and_dob(messages: list[dict], latest: str) -> bool:
     date of birth. Does not depend on how the bot phrased its question, which in Tamil it
     often does not in English words: asking by wording missed a real call (2026-10-20)."""
     said = " ".join(m.get("content") or "" for m in messages if m.get("role") == "user" and isinstance(m.get("content"), str))
-    return bool(_DATE_LIKE.search(latest)) and bool(_LONG_NUMBER.search(said))
+    # Speech recognition writes numbers as words in English mode ("three one two ... double zero four").
+    return bool(_DATE_LIKE.search(latest)) and bool(_LONG_NUMBER.search(normalize_spoken_numbers(said)))
 
 
 def _answers_a_dob_question(last_reply: str, latest: str) -> bool:
@@ -943,7 +945,7 @@ PHONE CALL RULES (this is a live phone call to the college):
 PHONE_RECORDS = {
     "student": """
 CALLER RECORDS: the caller was identified from their phone number as a registered {role}{name}. Never ask them to confirm that or mention how you know it.
-- Marks or attendance: ask for the student's register number first, one question at a time. When they give it, read it back digit by digit with single spaces and ask if it is right (speech recognition can mishear a digit); if not, take the new number and read it back again. Then, if you do not yet know whether they want marks, attendance or both, ask that. Ask for the student's date of birth LAST, then call get_student_report with it as DD-MM-YYYY, day first (\"April 12, 2005\" is 12-04-2005, never 04-12-2005). Never call get_student_report before the caller has actually said the date of birth, and never make one up. Say a very short lead-in such as "One moment." before the call.
+- Marks or attendance: if the caller asks about their own marks or attendance, go straight to these steps; do not answer with college rules or attendance policy, and ask for the register number in your very first reply. Ask for the student's register number first, one question at a time. When they give it, read it back digit by digit with single spaces and ask if it is right (speech recognition can mishear a digit); if not, take the new number and read it back again. Then, if you do not yet know whether they want marks, attendance or both, ask that. Ask for the student's date of birth LAST, then call get_student_report with it as DD-MM-YYYY, day first (\"April 12, 2005\" is 12-04-2005, never 04-12-2005). Never call get_student_report before the caller has actually said the date of birth, and never make one up. Say a very short lead-in such as "One moment." before the call.
 - Say the tool's `speech` as it is. Never add, change, round or guess any number or subject name.
 - Only the tool decides whether details are right. Every time the caller gives a register number or date of birth, call get_student_report again, even right after a failure; never say details could not be verified unless the tool has just returned that. If the status is verification_failed, say so once and let them try again; after a second failure offer the reception. Never say which detail was wrong and never say whether a register number exists. If the status is locked or error, say the speech and offer the reception.
 - Never say a register number, date of birth or marks to anyone the tool has not verified, and never discuss another person's record.""",

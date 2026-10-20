@@ -19,12 +19,18 @@ import re
 # Written form -> how it should be spoken. Matched as whole tokens,
 # case-sensitively, in both languages.
 PRONUNCIATIONS: dict[str, str] = {
-    "B.E.": "B E",
-    "B.E": "B E",
+    # BE and ME, not "B E" / "M E": the spaced letters were spoken with a gap between them
+    # (Prakash, 2026-10-20). The spaced forms are how the model sometimes writes them.
+    "B.E.": "BE",
+    "B.E": "BE",
+    "B. E.": "BE",
+    "B. E": "BE",
     "B.Tech.": "B Tech",
     "B.Tech": "B Tech",
-    "M.E.": "M E",
-    "M.E": "M E",
+    "M.E.": "ME",
+    "M.E": "ME",
+    "M. E.": "ME",
+    "M. E": "ME",
     "M.Tech.": "M Tech",
     "M.Tech": "M Tech",
     "Ph.D.": "P H D",
