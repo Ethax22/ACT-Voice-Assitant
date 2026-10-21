@@ -195,6 +195,10 @@ class PipelineProfile:
     on_built: Any = None
     audio_out_mixer: Any = None  # e.g. a looping background sound under the call (phone only)
     stt_language_code: str | None = None  # None: the call's language (en-IN / ta-IN); "auto" lets Sarvam pick
+    # 2: the saved recording keeps the caller (left) and the bot (right) apart, so a call viewer can
+    # draw them as two tracks. The website keeps one mixed track.
+    audio_channels: int = 1
+    observers: list = field(default_factory=list)  # Pipecat observers, e.g. the phone test page's live view
 
 
 def build_pipeline(websocket, language: Language, session_id: str, profile: PipelineProfile | None = None):
@@ -386,7 +390,7 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
     # language — reacts within about one turn, not instantly, since
     # detection is itself a real API call (~0.6-0.8s).
     audio_logger = AudioBufferProcessor(
-        num_channels=1, buffer_size=0, auto_start_recording=True
+        num_channels=profile.audio_channels, buffer_size=0, auto_start_recording=True
     )
 
     @audio_logger.event_handler("on_audio_data")
@@ -424,7 +428,8 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
     # enable_metrics: each service reports its time-to-first-byte (see
     # latency_metrics.py, which logs them) — measurement only, no behaviour change.
     worker = PipelineWorker(
-        pipeline, params=PipelineParams(allow_interruptions=True, enable_metrics=True)
+        pipeline, params=PipelineParams(allow_interruptions=True, enable_metrics=True),
+        observers=list(profile.observers) or None,
     )
 
     # Greeting (Phase 5): speaks GREETINGS[language] immediately once the
