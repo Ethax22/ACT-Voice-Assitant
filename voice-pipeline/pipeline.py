@@ -199,6 +199,8 @@ class PipelineProfile:
     # draw them as two tracks. The website keeps one mixed track.
     audio_channels: int = 1
     observers: list = field(default_factory=list)  # Pipecat observers, e.g. the phone test page's live view
+    # False: speak the greeting live and do not cache it (an outbound greeting holds the lead's name).
+    cache_greeting: bool = True
 
 
 def build_pipeline(websocket, language: Language, session_id: str, profile: PipelineProfile | None = None):
@@ -454,12 +456,13 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
     # in the background for the next call.
     @transport.event_handler("on_client_connected")
     async def _on_client_connected(transport, client):
-        clip = greeting_cache.load(language, greetings[language])
+        clip = greeting_cache.load(language, greetings[language]) if profile.cache_greeting else None
         if clip:
             await worker.queue_frames([PlayGreetingFrame(greetings[language], clip)])
         else:
             await worker.queue_frames([TTSSpeakFrame(greetings[language])])
-            asyncio.create_task(greeting_cache.ensure_rendered(language, greetings[language]))
+            if profile.cache_greeting:
+                asyncio.create_task(greeting_cache.ensure_rendered(language, greetings[language]))
 
     # On hangup, tear the whole pipeline down. Without this the Sarvam STT
     # websocket stays open until its 60s inactivity timeout fires an error.

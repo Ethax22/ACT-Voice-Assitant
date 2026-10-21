@@ -275,6 +275,39 @@ def test_a_new_faculty_id_is_read_back_by_code_before_any_lookup():
     assert main._forced_tool_choice([user("my ID is FAC 1001")], "t-rb", "faculty", tools, phone=False) == {}
 
 
+def test_outbound_call_gets_the_lead_and_its_own_rules():
+    lead = {"role": "lead", "direction": "outbound", "lead_name": "Ravi", "lead_course": "B.E. CSE",
+            "enquiry_source": "our website", "enquiry_date": "recently", "admissions_phone": "7358011190"}
+    block = main._phone_block(lead)
+    assert "OUTBOUND CALL" in block and "Ravi" in block and "B.E. CSE" in block
+    assert "7 3 5 8 0 1 1 1 9 0" in block and "leave_voicemail" in block and "never Sunday" in block
+    assert "CALLER RECORDS" not in block and "get_student_report" not in block
+    empty = main._phone_block({"role": "lead", "direction": "outbound"})
+    assert "engineering" in empty and "our website" in empty   # the Indus defaults
+
+
+def test_outbound_forces_voicemail_and_do_not_call_and_never_a_lead():
+    tools = [{"type": "function", "function": {"name": n}} for n in ("leave_voicemail", "end_call", "transfer_call")]
+    greet = {"role": "assistant", "content": "Hello Ravi, this is Agni AI... Is this a good time?"}
+
+    def forced(text, role="lead"):
+        c = main._forced_tool_choice([greet, {"role": "user", "content": text}], "t-out", role, tools, phone=True)
+        tc = c.get("tool_choice")
+        return tc["function"]["name"] if isinstance(tc, dict) else tc
+
+    assert forced("Please leave your message after the tone.") == "leave_voicemail"
+    assert forced("The number you have dialled is currently switched off") == "leave_voicemail"
+    assert forced("Please stop calling me") == "end_call"
+    assert forced("I'm not interested, thanks") == "end_call"
+    assert forced("call பண்ணாதீங்க") == "end_call"
+    assert forced("Ravi? No, wrong number.") == "end_call"
+    assert forced("Yes, this is Ravi, tell me") is None
+    assert forced("Can I talk to someone in admissions?") == "transfer_call"
+    assert forced("Please leave your message after the tone.", role="unknown") is None   # inbound: not used
+    # a lead giving a phone number is never forced into capture_lead
+    assert main._should_force_lead_capture([{"role": "user", "content": "call me on 9876543210"}], "t-out2", "lead") is False
+
+
 def test_the_phone_gets_ist_date_time_in_12_hour_form_and_office_hours():
     from datetime import datetime, timezone, timedelta
     ist = timezone(timedelta(hours=5, minutes=30))
