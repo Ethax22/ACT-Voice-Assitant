@@ -365,6 +365,14 @@ that remains the Calling Agent's requirement, in its own codebase.
   bot did answer. Treat it as a hint until tuned against real data.
 - Decide whether it should be shown anywhere other than the local report file.
 
+**Phone calls (added 2026-10-21):** the report also covers the Calling Agent's
+phone calls, in four channels: website chat, website voice, phone inbound, phone
+outbound (`--channel website|phone|all`). Phone calls have their own prompt; the
+website prompt is unchanged. Before this the report took phone calls in by mistake
+and counted them as website voice. The phone agent judges each call right after it
+ends and shows the results on its test page (Analytics → Sentiment). Details:
+`docs/Calling_Agent_DIY_Implementation_Plan.md`.
+
 **Automatic run (added 2026-10-09):** `main.py` starts
 `sentiment_report.run_periodically()` as a background task at startup. Whenever
 the newest report in `rag-backend/reports/` is older than
