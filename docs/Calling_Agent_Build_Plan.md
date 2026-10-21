@@ -1,5 +1,11 @@
 # Calling Agent — Build Plan
 
+> **2026-10-18:** a plan to replace Indus with our own pipeline (Sarvam listening,
+> Cartesia voice, Vobiz line) is in `Calling_Agent_DIY_Build_Plan.md`. Approved by
+> Prakash on 2026-10-18 and being built (`Calling_Agent_DIY_Implementation_Plan.md`).
+> Indus still answers the college's calls until the cut-over (Phase 6 of that plan);
+> this file describes that Indus setup.
+
 **Status:** reference-only planning doc. Per `CLAUDE.md`, the Calling Agent is
 a separate product built in its **own codebase**, not this one — this file
 just holds the plan until that codebase exists, so the reasoning isn't lost.
