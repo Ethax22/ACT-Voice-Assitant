@@ -39,6 +39,16 @@ def test_ratings_percentages_and_counts():
     assert say("175-185 companies") == "one hundred seventy-five to one hundred eighty-five companies"
 
 
+def test_internal_assessment_test_is_spoken_in_full():
+    assert say("IA TEST-1 marks.") == "Internal Assessment Test one marks."
+    assert say("your IA Test-1 marks") == "your Internal Assessment Test one marks"
+    assert say("IAT-2 results") == "Internal Assessment Test two results"
+    assert say("I.A.T 3") == "Internal Assessment Test three"
+    assert say("the IAT marks") == "the Internal Assessment Test marks"
+    assert say("Internal Assessment Test 1 marks.") == "Internal Assessment Test one marks."
+    assert say("IATA rules and the VIA test 1") == "IATA rules and the VIA test one"
+
+
 def test_phone_numbers_and_codes_stay_as_digits():
     assert say("call 044-67409444") == "call 044-67409444"
     assert say("counselling code 1316") == "counselling code 1316"

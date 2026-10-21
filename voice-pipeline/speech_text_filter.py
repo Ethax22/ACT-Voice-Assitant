@@ -59,6 +59,11 @@ _PRONUNCIATION_RE = re.compile(
     + "|".join(re.escape(k) for k in sorted(PRONUNCIATIONS, key=len, reverse=True))
     + r")(?!\w)"
 )
+# The college's internal exams. erp-lookup writes "Internal Assessment Test 1", but the model
+# rewords it as "IA Test-1", "IA TEST-1" or "IAT-1", and the voice blurred "IA" (Prakash,
+# 2026-10-21: "doesn't tell IAT-1 clearly"). Spoken in full, as he chose.
+_EXAM_NUMBERED = re.compile(r"(?<![\w.])I\.?\s?A\.?\s?T(?:EST|est)?\s*[-–]?\s*(\d+)\b")
+_EXAM_BARE = re.compile(r"(?<![\w.])IAT(?![\w-])")
 _MARKDOWN = re.compile(r"[*#`~]+|^\s*[-•]\s+", re.MULTILINE)
 _URL_SCHEME = re.compile(r"https?://(?:www\.)?")
 
@@ -155,5 +160,7 @@ async def to_speech(text: str, aggregation_type=None) -> str:
     text = _PRONUNCIATION_RE.sub(lambda m: PRONUNCIATIONS[m.group(1)], text)
     if ended_with_period and not text.rstrip().endswith("."):
         text = text.rstrip() + "."  # "...and M.E." ends the sentence: the entry for "M.E." swallowed its dot
+    text = _EXAM_NUMBERED.sub(r"Internal Assessment Test \1", text)
+    text = _EXAM_BARE.sub("Internal Assessment Test", text)
     text = _NUMBER_RE.sub(_numbers, text)
     return re.sub(r"[ \t]{2,}", " ", text)

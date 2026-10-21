@@ -219,6 +219,50 @@ def test_forced_tool_choice_for_the_three_turns_that_can_only_be_one_thing():
     assert main._forced_tool_choice([{"role": "user", "content": "talk to someone"}], "t-fc", None, None) == {}
 
 
+def test_the_class_tool_is_forced_on_a_confirmed_faculty_id_or_a_class_pick():
+    tools = [{"type": "function", "function": {"name": "get_class_summary"}},
+             {"type": "function", "function": {"name": "transfer_call"}}]
+
+    def forced(*msgs, role="faculty"):
+        c = main._forced_tool_choice(list(msgs), "t-fac", role, tools, phone=True).get("tool_choice")
+        return c if isinstance(c, str) or c is None else c["function"]["name"]
+
+    user = lambda text: {"role": "user", "content": text}
+    bot = lambda text: {"role": "assistant", "content": text}
+    said = user("my faculty ID is FAC 1001")
+    assert forced(said, bot("That is F A C 1 0 0 1. Is that right?"), user("yes")) == "get_class_summary"
+    assert forced(said, bot("That is F A C one zero zero one. Is that correct?"), user("yes correct")) == "get_class_summary"
+    assert forced(said, bot("That is F A C 1 0 0 1. Is that right?"), user("no, it is FAC 1002")) == "none"  # new ID: read back
+    assert forced(said, bot("That is F A C 1 0 0 1. Is that right?"), user("yes"), role="student") is None
+    assert forced(said, bot("Which do you need, attendance or marks?"), user("yes")) is None
+    listed = [said, bot("..."), {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]},
+              {"role": "tool", "tool_call_id": "1", "content": '{"status": "choose_class", "speech": "..."}'},
+              bot("You are in charge of 2 classes: CSE ...; ECE .... Which class would you like?")]
+    assert forced(*listed, user("the ECE one")) == "get_class_summary"
+    assert forced(*listed, user("fourth year")) == "get_class_summary"
+    assert forced(*listed, user("what are the hostel fees?")) is None
+    done = [*listed[:3], {"role": "tool", "tool_call_id": "1", "content": '{"status": "ok", "speech": "..."}'}, bot("...")]
+    assert forced(*done, user("the ECE one")) is None
+    # a faculty caller is still never forced into a lead by the ID's digits
+    assert main._should_force_lead_capture([user("FAC 10012345678")], "t-fac2", "faculty") is False
+
+
+def test_a_new_faculty_id_is_read_back_by_code_before_any_lookup():
+    user = lambda text: {"role": "user", "content": text}
+    bot = lambda text: {"role": "assistant", "content": text}
+    tools = [{"type": "function", "function": {"name": "get_class_summary"}}]
+    needs = lambda *m, role="faculty": main._faculty_needs_readback(list(m), role)
+    assert needs(user("My faculty ID is FAC 1001"))
+    assert needs(user("F A C one zero zero one"))
+    assert not needs(user("FAC1001"), role="student")
+    assert not needs(user("the 2023 batch please"))                       # a year is not an ID
+    assert not needs(user("FAC1001"), bot("That is F A C 1 0 0 1. Right?"), user("yes"))
+    verified = [user("FAC1001"), {"role": "tool", "content": '{"status": "choose_class"}'}, bot("Which class?")]
+    assert not needs(*verified, user("ECE 2025"))                          # already accepted on this call
+    assert main._forced_tool_choice([user("my ID is FAC 1001")], "t-rb", "faculty", tools, phone=True) == {"tool_choice": "none"}
+    assert main._forced_tool_choice([user("my ID is FAC 1001")], "t-rb", "faculty", tools, phone=False) == {}
+
+
 def test_the_phone_gets_ist_date_time_in_12_hour_form_and_office_hours():
     from datetime import datetime, timezone, timedelta
     ist = timezone(timedelta(hours=5, minutes=30))

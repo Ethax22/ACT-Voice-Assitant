@@ -407,6 +407,51 @@ def _answers_a_dob_question(last_reply: str, latest: str) -> bool:
 
 _YES = re.compile(r"^\W*(yes|yeah|yep|sure|ok|okay|please|haan|aama|sari|seri|ஆமா|ஆம்|சரி)(?:\W|$)", re.I)
 _TRANSFER_OFFERED = re.compile(r"transfer|connect you|connect your call", re.I)
+# A faculty ID read back character by character ("F A C 1 0 0 1"): three or more single letters
+# or digits in a row, separated by spaces. Language-independent, unlike the words around it.
+_READBACK = re.compile(r"(?<!\S)(?:[A-Za-z0-9][\s,.-]+){2,}[A-Za-z0-9](?!\S)")
+# A caller naming one of their classes or what they want about it, after the bot listed them.
+_CLASS_OR_TOPIC = re.compile(
+    r"\b(?:(?:19|20)\d\d|section|first|second|third|fourth|final|fifth|1st|2nd|3rd|4th|5th|year|"
+    r"computer|electronics|electrical|mechanical|civil|attendance|marks?|results?|pass(?:ed)?|test)\b", re.I)
+_PROGRAMME_CODE = re.compile(r"\b[A-Z]{2,5}\b")  # CSE, ECE, EEE, IT: capitals only, so "what" does not count
+
+
+FACULTY_READBACK_FINAL = (
+    " The caller just gave their faculty ID. Read it back character by character with single spaces "
+    "(for example \"F A C 1 0 0 1\") and ask if it is right. Say nothing else in this reply and do not look anything up yet."
+)
+_YEAR_ONLY = re.compile(r"\b(?:19|20)\d\d\b")
+
+
+def _faculty_needs_readback(messages: list[dict], caller_role: str | None) -> bool:
+    """A faculty caller's latest message holds what looks like a faculty ID (three or more digits,
+    not just a year) and no faculty ID has been accepted on this call yet. Measured 2026-10-21 on
+    typed calls: the model read the ID back in 2 of 4 dialogs and otherwise looked up an unchecked
+    ID or never called the tool, so this turn's read-back comes from code, like a lead's number."""
+    if caller_role != "faculty" or not _no_reply_since_last_user_message(messages):
+        return False
+    if any(m.get("role") == "tool" and isinstance(m.get("content"), str)
+           and re.search(r'"status":\s*"(?:ok|choose_class|choose_topic)"', m["content"]) for m in messages):
+        return False
+    latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+    digits = _YEAR_ONLY.sub(" ", normalize_spoken_numbers(latest if isinstance(latest, str) else ""))
+    return bool(re.search(r"\d(?:[\s-]?\d){2,}", digits))
+
+
+def _confirms_faculty_readback(last_reply: str, latest: str) -> bool:
+    """The bot just read a faculty ID back and the caller said yes: the ID is complete."""
+    return (len(latest.split()) <= 5 and bool(_YES.search(latest))
+            and bool(_READBACK.search(normalize_spoken_numbers(last_reply))))
+
+
+def _answers_a_class_list(messages: list[dict], latest: str) -> bool:
+    """The last tool result asked the caller to pick a class or a topic, the bot has said it,
+    and the caller's reply names one."""
+    last_tool = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "tool"), "")
+    if not isinstance(last_tool, str) or not re.search(r'"status":\s*"choose_(?:class|topic)"', last_tool):
+        return False
+    return bool(_CLASS_OR_TOPIC.search(latest) or _PROGRAMME_CODE.search(latest))
 
 
 def _forced_tool_choice(
@@ -423,6 +468,8 @@ def _forced_tool_choice(
     if _should_force_lead_capture(messages, session_id, caller_role, confirm_first=phone):
         return {"tool_choice": FORCE_CAPTURE_LEAD}
     names = {(t.get("function") or {}).get("name") for t in client_tools or []}
+    if phone and names and _faculty_needs_readback(messages, caller_role):
+        return {"tool_choice": "none"}  # this turn only reads the faculty ID back (FACULTY_READBACK_FINAL)
     latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
     last_reply = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "assistant"), "")
     last_reply = last_reply if isinstance(last_reply, str) else ""
@@ -435,6 +482,11 @@ def _forced_tool_choice(
     if ("get_student_report" in names and caller_role in ("student", "parent") and unanswered
             and _gave_register_number_and_dob(messages, latest)):
         return force("get_student_report")
+    # Faculty: the caller confirms the read-back faculty ID, or picks a class from the list the
+    # tool returned. The phone agent still refuses an ID the caller never said.
+    if ("get_class_summary" in names and caller_role == "faculty" and unanswered
+            and (_confirms_faculty_readback(last_reply, latest) or _answers_a_class_list(messages, latest))):
+        return force("get_class_summary")
     if "transfer_call" in names and unanswered and (
         _WANTS_PERSON.search(latest)
         or (len(latest.split()) <= 5 and _YES.search(latest) and _TRANSFER_OFFERED.search(last_reply))
@@ -951,9 +1003,11 @@ CALLER RECORDS: the caller was identified from their phone number as a registere
 - Never say a register number, date of birth or marks to anyone the tool has not verified, and never discuss another person's record.""",
     "faculty": """
 CALLER RECORDS: the caller was identified from their phone number as faculty{name}. Never ask them to confirm that or mention how you know it.
-- Questions about their class (students below 75 percent attendance, or the latest test result): call get_class_summary with topic low_attendance or marks_summary. Say a very short lead-in such as "One moment." first.
+- Class details (students below 75 percent attendance, or the latest internal assessment result, for a class they are in charge of): go straight to these steps. If you do not know which of the two they want, ask that first. Then ask for their faculty ID. When they give it, read it back character by character with single spaces (for example "F A C 1 0 0 1") and ask if it is right (speech recognition can mishear it); if not, take the new ID and read it back again. When they confirm, call get_class_summary with the faculty ID, the topic, and class_name = the class they named (empty if they have not named one). You do not need to know the class first: the tool lists their classes when it needs to. Never call get_class_summary before the caller has said the faculty ID, and never make one up. Say a very short lead-in such as "One moment." before the call.
+- If the status is choose_class, say the speech as it is (it lists their classes); when they pick one, call get_class_summary again with that class as class_name. If the status is choose_topic, ask which of the two they want and call it again.
 - Say the tool's `speech` as it is. Never add, change, round or guess any number or name.
-- Student marks or attendance by register number are not available to faculty on this call: offer the reception.""",
+- Only the tool decides whether the faculty ID is right. If the status is verification_failed, say so once and let them try again; after a second failure offer the reception. If the status is locked, no_classes or error, say the speech and offer the reception.
+- One student's marks or attendance by register number are not available to faculty on this call: offer the reception.""",
 }
 PHONE_RECORDS["parent"] = PHONE_RECORDS["student"]
 PHONE_RECORDS_UNKNOWN = """
@@ -1066,10 +1120,11 @@ async def _build_full_messages(
             # On the phone for every style: speech recognition often hears Tanglish
             # ("fees evlo bro") as English, and the English reply then said "bro".
             + (NO_BRO_FINAL if phone or language in ("ta", "ta_en") else "")
-            + (NO_LOOKUP_YET if phone and (caller or {}).get("role") in ("student", "parent")
+            + (NO_LOOKUP_YET if phone and (caller or {}).get("role") in RECORDS_ROLES
                and not any(m.get("role") == "tool" for m in messages) else "")
             + (READBACK_FINAL if phone and _phone_needs_readback(
                 messages, session_id, (caller or {}).get("role")) else "")
+            + (FACULTY_READBACK_FINAL if phone and _faculty_needs_readback(messages, (caller or {}).get("role")) else "")
             + (ACK_FINAL if kind == "ack" else "")
             + ("" if kind == "closing" else FACTS_RULE + _already_said_rule(messages)),
         },
