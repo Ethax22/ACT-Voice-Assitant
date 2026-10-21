@@ -243,6 +243,18 @@ def test_the_class_tool_is_forced_on_a_confirmed_faculty_id_or_a_class_pick():
     assert forced(*listed, user("what are the hostel fees?")) is None
     done = [*listed[:3], {"role": "tool", "tool_call_id": "1", "content": '{"status": "ok", "speech": "..."}'}, bot("...")]
     assert forced(*done, user("the ECE one")) is None
+    # Tamil "correct" with more words after it (real call, 2026-10-21)
+    assert forced(said, bot("உங்க ஃபேக்கல்டி ஐடி F A C 1 0 0 1, இது கரெக்ட் தான?"),
+                  user("கரெக்ட் தாங்க. என்னோட கிளாஸ்ஸோட சம்மரி சொல்லுங்க.")) == "get_class_summary"
+    # after an answer, a new request about another class or topic looks it up again (real call: it transferred)
+    answered = [said, bot("..."), {"role": "assistant", "content": None, "tool_calls": [{"id": "2"}]},
+                {"role": "tool", "tool_call_id": "2", "content": '{"status": "ok", "speech": "..."}'},
+                bot("..."), user("சரி ஓகேங்க."), bot("வேற ஏதாவது details வேணுமா?")]
+    assert forced(*answered, user("அப்படியே என்னோட வேற ஒரு கிளாஸ் இருக்கு. ECE 2025 A செக்ஷன். அதுல இருந்து எனக்கு மார்க்ஸ் வேணும்.")) == "get_class_summary"
+    assert forced(*answered, user("and the marks for my ECE class?")) == "get_class_summary"
+    assert forced(*answered, user("what are the hostel fees?")) is None
+    assert forced(*answered, user("can I talk to someone in the office about attendance")) == "transfer_call"
+    assert forced(said, bot("Which do you need?"), user("marks please")) is None   # not verified yet: no lookup
     # a faculty caller is still never forced into a lead by the ID's digits
     assert main._should_force_lead_capture([user("FAC 10012345678")], "t-fac2", "faculty") is False
 

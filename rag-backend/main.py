@@ -415,6 +415,13 @@ _CLASS_OR_TOPIC = re.compile(
     r"\b(?:(?:19|20)\d\d|section|first|second|third|fourth|final|fifth|1st|2nd|3rd|4th|5th|year|"
     r"computer|electronics|electrical|mechanical|civil|attendance|marks?|results?|pass(?:ed)?|test)\b", re.I)
 _PROGRAMME_CODE = re.compile(r"\b[A-Z]{2,5}\b")  # CSE, ECE, EEE, IT: capitals only, so "what" does not count
+# Asking for class attendance or marks, in English or Tamil (as speech recognition writes it).
+_CLASS_DATA_ASKED = re.compile(
+    r"\b(?:attendance|marks?|results?|pass(?:ed)?|internal|assessment)\b"
+    r"|அட்டனன்ஸ்|அட்டெண்டன்ஸ்|அட்டென்டன்ஸ்|வருகை|மார்க்|மதிப்பெண்|ரிசல்ட்|ரிசல்ட்ஸ்|பாஸ்", re.I)
+# A yes to the read-back. Wider than _YES: "correct", and Tamil "கரெக்ட் தாங்க" on a real call (2026-10-21).
+_CONFIRM = re.compile(
+    r"^\W*(?:yes|yeah|yep|yup|sure|ok|okay|correct|right|exactly|haan|aama|sari|seri|ஆமா|ஆம்|சரி|கரெக்ட்|கரெக்டு|கரெக்டா)(?:\W|$)", re.I)
 
 
 FACULTY_READBACK_FINAL = (
@@ -440,9 +447,24 @@ def _faculty_needs_readback(messages: list[dict], caller_role: str | None) -> bo
 
 
 def _confirms_faculty_readback(last_reply: str, latest: str) -> bool:
-    """The bot just read a faculty ID back and the caller said yes: the ID is complete."""
-    return (len(latest.split()) <= 5 and bool(_YES.search(latest))
+    """The bot just read a faculty ID back and the caller said yes: the ID is complete. The yes may
+    be followed by more ("கரெக்ட் தாங்க. என்னோட கிளாஸ்ஸோட சம்மரி சொல்லுங்க." was 6 words and
+    missed the old 5-word limit); a corrected ID with digits is read back again instead (that rule runs first)."""
+    return (len(latest.split()) <= 12 and bool(_CONFIRM.search(latest))
             and bool(_READBACK.search(normalize_spoken_numbers(last_reply))))
+
+
+def _faculty_verified(messages: list[dict]) -> bool:
+    """A faculty ID has been accepted on this call (a class tool result that was not a failure)."""
+    return any(m.get("role") == "tool" and isinstance(m.get("content"), str)
+               and re.search(r'"status":\s*"(?:ok|choose_class|choose_topic)"', m["content"]) for m in messages)
+
+
+def _asks_for_more_class_data(messages: list[dict], latest: str) -> bool:
+    """After the faculty ID is accepted, a new request for class attendance or marks. On a real call
+    (2026-10-21) the model told a verified faculty member that marks for their second class had to
+    come from the reception, then transferred them; the lookup was never called."""
+    return _faculty_verified(messages) and bool(_CLASS_DATA_ASKED.search(latest)) and not _WANTS_PERSON.search(latest)
 
 
 def _answers_a_class_list(messages: list[dict], latest: str) -> bool:
@@ -485,7 +507,8 @@ def _forced_tool_choice(
     # Faculty: the caller confirms the read-back faculty ID, or picks a class from the list the
     # tool returned. The phone agent still refuses an ID the caller never said.
     if ("get_class_summary" in names and caller_role == "faculty" and unanswered
-            and (_confirms_faculty_readback(last_reply, latest) or _answers_a_class_list(messages, latest))):
+            and (_confirms_faculty_readback(last_reply, latest) or _answers_a_class_list(messages, latest)
+                 or _asks_for_more_class_data(messages, latest))):
         return force("get_class_summary")
     if "transfer_call" in names and unanswered and (
         _WANTS_PERSON.search(latest)
@@ -1005,9 +1028,10 @@ CALLER RECORDS: the caller was identified from their phone number as a registere
 CALLER RECORDS: the caller was identified from their phone number as faculty{name}. Never ask them to confirm that or mention how you know it.
 - Class details (students below 75 percent attendance, or the latest internal assessment result, for a class they are in charge of): go straight to these steps. If you do not know which of the two they want, ask that first. Then ask for their faculty ID. When they give it, read it back character by character with single spaces (for example "F A C 1 0 0 1") and ask if it is right (speech recognition can mishear it); if not, take the new ID and read it back again. When they confirm, call get_class_summary with the faculty ID, the topic, and class_name = the class they named (empty if they have not named one). You do not need to know the class first: the tool lists their classes when it needs to. Never call get_class_summary before the caller has said the faculty ID, and never make one up. Say a very short lead-in such as "One moment." before the call.
 - If the status is choose_class, say the speech as it is (it lists their classes); when they pick one, call get_class_summary again with that class as class_name. If the status is choose_topic, ask which of the two they want and call it again.
-- Say the tool's `speech` as it is. Never add, change, round or guess any number or name.
+- Later in the call they can ask about another of their classes, or the other of the two (attendance or marks), as often as they like: call get_class_summary again with that topic and class_name. Do not ask for the faculty ID again. Class attendance and class marks always come from get_class_summary: never send a faculty member to the reception for them.
+- Say the tool's `speech` as it is, every name and number exactly; in Tamil keep the names and numbers as they are. Never add, change, round, count again or guess any number or name.
 - Only the tool decides whether the faculty ID is right. If the status is verification_failed, say so once and let them try again; after a second failure offer the reception. If the status is locked, no_classes or error, say the speech and offer the reception.
-- One student's marks or attendance by register number are not available to faculty on this call: offer the reception.""",
+- The only thing not available to faculty here is one individual student's full record looked up by register number: for that, offer the reception.""",
 }
 PHONE_RECORDS["parent"] = PHONE_RECORDS["student"]
 PHONE_RECORDS_UNKNOWN = """
