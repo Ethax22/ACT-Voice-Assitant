@@ -23,3 +23,24 @@ def test_degree_names_and_acronyms_have_no_spaced_letters():
 
 def test_a_plain_word_me_is_not_touched():
     assert say("Please help me, ME is a degree") == "Please help me, ME is a degree"
+
+
+def test_years_and_ranges_are_spoken_as_numbers_not_digits():
+    assert say("in 2024") == "in twenty twenty-four"
+    assert say("2024-25 season-ல") == "twenty twenty-four to twenty-five season-ல"
+    assert say("2001-ல") == "two thousand one-ல"
+    assert say("1999") == "nineteen ninety-nine"
+
+
+def test_ratings_percentages_and_counts():
+    assert say("3.9 out of 5") == "three point nine out of five"
+    assert say("88% students") == "eighty-eight percent students"
+    assert say("71,670 books") == "seventy-one thousand six hundred seventy books"
+    assert say("175-185 companies") == "one hundred seventy-five to one hundred eighty-five companies"
+
+
+def test_phone_numbers_and_codes_stay_as_digits():
+    assert say("call 044-67409444") == "call 044-67409444"
+    assert say("counselling code 1316") == "counselling code 1316"
+    assert say("number 94450") == "number 94450"
+    assert say("24/7 and the 1st year") == "24/7 and the 1st year"

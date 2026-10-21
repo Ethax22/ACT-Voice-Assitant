@@ -676,7 +676,16 @@
   // route requires the backend's bearer auth key, which must never be
   // present in browser JS. /widget/chat holds that key server-side and
   // shares the exact same retrieval + persona logic.
-  const RAG_BACKEND_WIDGET_URL = 'http://localhost:8000/widget/chat';
+  //
+  // Where the backends are: on a server (the page opened from a real host name,
+  // e.g. the Azure test VM) nginx serves this page and both backends from the
+  // same address, so the paths are relative to the page. Opened as a file or
+  // from localhost/127.0.0.1, the local dev ports are used as before.
+  const ON_SERVER = location.protocol.startsWith('http') &&
+    !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  const HTTP_BASE = ON_SERVER ? location.origin : null;
+  const WS_BASE = ON_SERVER ? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}` : null;
+  const RAG_BACKEND_WIDGET_URL = ON_SERVER ? `${HTTP_BASE}/widget/chat` : 'http://localhost:8000/widget/chat';
 
   // Phase 10 (logging): one id per browser tab's chat session, sent with
   // every /widget/chat call so the backend can group turns into a single
@@ -790,8 +799,8 @@
   // audio_out_sample_rate. Playing 24kHz audio back at 16kHz is what made
   // Tamil voice sound slowed-down/robotic in earlier testing.
   const VOICE_ENDPOINTS = {
-    en: { wsUrl: 'ws://localhost:8001/voice/en', playbackSampleRate: 24000 },
-    ta: { wsUrl: 'ws://localhost:8001/voice/ta', playbackSampleRate: 24000 },
+    en: { wsUrl: ON_SERVER ? `${WS_BASE}/voice/en` : 'ws://localhost:8001/voice/en', playbackSampleRate: 24000 },
+    ta: { wsUrl: ON_SERVER ? `${WS_BASE}/voice/ta` : 'ws://localhost:8001/voice/ta', playbackSampleRate: 24000 },
   };
   const MIC_SEND_SAMPLE_RATE = 16000; // must match the input sample rate on both voice paths
 
@@ -799,7 +808,7 @@
   // rather than a WebSocket. Detection needs ~1.5s of speech to be reliable
   // (confirmed in backend testing against short clips) — DETECTION_SAMPLES
   // is that duration's worth of 16kHz mono samples.
-  const DETECT_LANGUAGE_URL = 'http://localhost:8001/detect-language';
+  const DETECT_LANGUAGE_URL = ON_SERVER ? `${HTTP_BASE}/detect-language` : 'http://localhost:8001/detect-language';
   const DETECTION_SAMPLES = MIC_SEND_SAMPLE_RATE * 1.5;
   // Pre-connect detection is switched off (2026-10-08): calls always open on
   // English and the in-call ConversationRouter switches to Tamil on the first

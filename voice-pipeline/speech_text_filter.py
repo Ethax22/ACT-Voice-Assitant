@@ -1,9 +1,12 @@
 """Last-step clean-up of reply text before it reaches TTS.
 
-Deliberately small. Bulbul v3 already normalises numbers, dates and currency
-itself (Pipecat's TTS_MODEL_CONFIGS marks bulbul:v3 as
-`preprocessing_always_enabled`), so this does NOT spell out numbers — doing
-it twice, or doing it in English on a Tamil reply, would make things worse.
+Numbers are spelled out in English words here, in both languages (2026-10-20):
+Cartesia read raw digits in Tamil sentences digit by digit ("2024" -> "இரண்டு
+பூஜ்ஜியம் இரண்டு நாலு") and a year range like "2024-25" was left untouched. So
+"2024" is sent as "twenty twenty-four", "2024-25" as "twenty twenty-four to
+twenty-five", "3.9" as "three point nine", "88%" as "eighty-eight percent".
+Phone numbers, leading-zero codes and plain 4+ digit codes (1316) are left as
+written so they are still read digit by digit.
 
 What it does handle is what the vendor can't know:
 - formatting symbols the LLM occasionally emits despite the prompt rule
@@ -60,42 +63,83 @@ _MARKDOWN = re.compile(r"[*#`~]+|^\s*[-•]\s+", re.MULTILINE)
 _URL_SCHEME = re.compile(r"https?://(?:www\.)?")
 
 
-_TAMIL_SCRIPT = re.compile(r"[஀-௿]")
-# A year standing alone: not part of a longer number, a phone number, a
-# decimal or a range like 2024-25 (Bulbul already reads those as numbers).
-_YEAR = re.compile(r"(?<![\d.,-])(19|20)(\d\d)(?![\d.,]|-\d)")
-_TA_UNITS = ["", "ஒன்று", "இரண்டு", "மூன்று", "நான்கு", "ஐந்து", "ஆறு", "ஏழு", "எட்டு", "ஒன்பது"]
-_TA_TEENS = ["பத்து", "பதினொன்று", "பன்னிரண்டு", "பதின்மூன்று", "பதினான்கு", "பதினைந்து",
-             "பதினாறு", "பதினேழு", "பதினெட்டு", "பத்தொன்பது"]
-_TA_TENS = ["", "", "இருபது", "முப்பது", "நாற்பது", "ஐம்பது", "அறுபது", "எழுபது", "எண்பது", "தொண்ணூறு"]
-_TA_TENS_JOINING = ["", "", "இருபத்து", "முப்பத்து", "நாற்பத்து", "ஐம்பத்து", "அறுபத்து",
-                    "எழுபத்து", "எண்பத்து", "தொண்ணூற்று"]
+_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+         "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+         "eighteen", "nineteen"]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 
 
-def _tamil_year(match: re.Match) -> str:
-    """1900-2099 as spoken Tamil, e.g. 2001 -> இரண்டாயிரத்து ஒன்று.
+def _below_100(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    return _TENS[n // 10] + (f"-{_ONES[n % 10]}" if n % 10 else "")
 
-    In Tamil sentences Bulbul reads a bare four-digit year digit by digit
-    ("2001-ல" came out as "இரண்டு பூஜ்ஜியம் பூஜ்ஜியம் ஒன்றில்" — confirmed
-    2026-10-07 by transcribing its audio back, after a visitor corrected the
-    bot on a real call). Codes and phone numbers SHOULD be read digit by
-    digit, so only years are spelled out."""
-    century, rest = match.group(1), int(match.group(2))
-    if century == "19":
-        head = "ஆயிரத்து தொள்ளாயிரத்து" if rest else "ஆயிரத்து தொள்ளாயிரம்"
-    else:
-        head = "இரண்டாயிரத்து" if rest else "இரண்டாயிரம்"
+
+def _int_words(n: int) -> str:
+    parts = []
+    if n >= 1000:
+        parts.append(f"{_int_words(n // 1000)} thousand")
+        n %= 1000
+    if n >= 100:
+        parts.append(f"{_ONES[n // 100]} hundred")
+        n %= 100
+    if n:
+        parts.append(_below_100(n))
+    return " ".join(parts) or "zero"
+
+
+def _year_words(n: int) -> str:
+    """1900-2099 the way people say a year: 2024 -> "twenty twenty-four"."""
+    if n < 2000:
+        rest = n % 100
+        return "nineteen " + (_below_100(rest) if rest else "hundred")
+    rest = n - 2000
     if rest == 0:
-        return head
+        return "two thousand"
     if rest < 10:
-        tail = _TA_UNITS[rest]
-    elif rest < 20:
-        tail = _TA_TEENS[rest - 10]
-    elif rest % 10 == 0:
-        tail = _TA_TENS[rest // 10]
+        return f"two thousand {_ONES[rest]}"
+    return f"twenty {_below_100(rest)}" if rest >= 20 else f"twenty {_ONES[rest]}"
+
+
+# One number, or a range of two ("2024-25", "175-185"), with an optional percent sign.
+# Not matched when glued to letters or to a longer number: "B2B", "1st", phone numbers.
+_N = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
+_NUMBER_RE = re.compile(
+    rf"(?<![A-Za-z\d.,/])({_N})(?:-({_N}))?(%?)(?!\d|[A-Za-z/]|[.,]\d)"
+)
+
+
+def _one_number(text: str, is_second_of_year_range: bool = False) -> str | None:
+    """Words for one numeric token, or None when it should be left as written
+    (phone numbers, codes, leading zeros, plain numbers of 4+ digits that are not a year)."""
+    if "," in text:
+        whole, _, frac = text.replace(",", "").partition(".")
     else:
-        tail = f"{_TA_TENS_JOINING[rest // 10]} {_TA_UNITS[rest % 10]}"
-    return f"{head} {tail}"
+        whole, _, frac = text.partition(".")
+    if len(whole) > 1 and whole.startswith("0"):
+        return None
+    n = int(whole)
+    if frac:
+        spoken = f"{_int_words(n)} point " + " ".join(_ONES[int(d)] for d in frac)
+    elif "," not in text and len(whole) == 4:
+        if not 1900 <= n <= 2099:
+            return None
+        spoken = _year_words(n)
+    elif "," not in text and len(whole) >= 5:
+        return None
+    else:
+        spoken = _int_words(n)
+    return spoken
+
+
+def _numbers(match: re.Match) -> str:
+    first, second, percent = match.group(1), match.group(2), match.group(3)
+    a = _one_number(first)
+    b = _one_number(second) if second else ""
+    if a is None or b is None:
+        return match.group(0)
+    out = a + (f" to {b}" if second else "")
+    return out + (" percent" if percent else "")
 
 
 async def to_speech(text: str, aggregation_type=None) -> str:
@@ -111,6 +155,5 @@ async def to_speech(text: str, aggregation_type=None) -> str:
     text = _PRONUNCIATION_RE.sub(lambda m: PRONUNCIATIONS[m.group(1)], text)
     if ended_with_period and not text.rstrip().endswith("."):
         text = text.rstrip() + "."  # "...and M.E." ends the sentence: the entry for "M.E." swallowed its dot
-    if _TAMIL_SCRIPT.search(text):
-        text = _YEAR.sub(_tamil_year, text)
+    text = _NUMBER_RE.sub(_numbers, text)
     return re.sub(r"[ \t]{2,}", " ", text)
