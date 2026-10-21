@@ -238,7 +238,10 @@ def build_pipeline(websocket, language: Language, session_id: str, profile: Pipe
     from raw_pcm_serializer import RawPCMSerializer
     from speech_text_filter import to_speech
     from turn_taking import build_user_aggregator_params, stt_silence_duration_ms
+    import sentence_split_fix
 
+    # Tamil replies: keep "B. E." / "M. E." in one sentence for the voice (see the module).
+    sentence_split_fix.install()
     profile = profile or PipelineProfile()
     greetings = profile.greetings or GREETINGS
     sarvam_api_key = os.environ["SARVAM_API_KEY"]
