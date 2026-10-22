@@ -304,7 +304,8 @@ async def _analyse(client: AsyncOpenAI, conv: dict, gate: asyncio.Semaphore) -> 
     return result
 
 
-def _bar_rows(counter: Counter, order: tuple | None, total: int) -> str:
+def _bar_rows(counter: Counter, order: tuple | None, total: int, kind: str | None = None) -> str:
+    """kind ("interest" or "topic") makes each row clickable: it filters the conversations table."""
     keys = [k for k in (order or [k for k, _ in counter.most_common()]) if counter.get(k)]
     if not keys:
         return '<p class="muted">None.</p>'
@@ -312,8 +313,10 @@ def _bar_rows(counter: Counter, order: tuple | None, total: int) -> str:
     for k in keys:
         n = counter[k]
         pct = 100 * n / total if total else 0
+        click = (f' data-kind="{kind}" data-key="{html.escape(str(k))}" role="button" tabindex="0"'
+                 f' title="Show these conversations"' if kind else "")
         rows.append(
-            f'<div class="bar"><span class="lbl">{html.escape(str(k))}</span>'
+            f'<div class="bar{" click" if kind else ""}"{click}><span class="lbl">{html.escape(str(k))}</span>'
             f'<span class="track"><span class="fill {html.escape(str(k))}" style="width:{pct:.0f}%"></span></span>'
             f'<span class="num">{n} ({pct:.0f}%)</span></div>'
         )
@@ -385,9 +388,10 @@ def _write_report(rows: list[dict], failed: int, start: date, end: date, channel
 
     order = {"negative": 0, "neutral": 1, "positive": 2}
     table_rows = "\n".join(
-        f"<tr><td>{r['date']}</td><td>{html.escape(_who(r))}</td>"
+        f"<tr data-interest=\"{r['admission_interest']}\" data-topics=\"{html.escape(' '.join(r['topics']))}\">"
+        f"<td>{r['date']}</td><td>{html.escape(_who(r))}</td>"
         f"<td><span class=\"pill {r['sentiment']}\">{r['sentiment']}</span></td>"
-        f"<td>{r['trend']}</td><td>{r['admission_interest']}</td>"
+        f"<td>{r['trend']}</td><td>{r['admission_interest']}</td><td>{html.escape(', '.join(r['topics']))}</td>"
         f"<td>{'yes — ' + html.escape(r['frustration_reason']) if r['frustrated'] else ''}</td>"
         f"<td>{html.escape(r['summary'])}</td><td class=\"muted\">{html.escape(r['session_id'][:8])}</td></tr>"
         for r in sorted(rows, key=lambda r: (not r["frustrated"], order[r["sentiment"]], r["date"]))
@@ -424,6 +428,9 @@ def _write_report(rows: list[dict], failed: int, start: date, end: date, channel
   .scroll {{ overflow-x:auto; }} table {{ border-collapse:collapse; width:100%; min-width:760px; }}
   th, td {{ text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; font-size:14px; }}
   th {{ color:var(--muted); font-weight:500; }}
+  .bar.click {{ cursor:pointer; border-radius:6px; }} .bar.click:hover, .bar.click:focus-visible {{ background:var(--card); outline:none; }}
+  .bar.active {{ background:var(--card); font-weight:600; }}
+  #filterNote button {{ margin-left:8px; }}
   .pill {{ padding:1px 8px; border-radius:10px; color:#fff; font-size:12px; }}
   .pill.positive {{ background:var(--pos); }} .pill.neutral {{ background:var(--neu); }} .pill.negative {{ background:var(--neg); }}
 </style></head><body>
@@ -449,20 +456,51 @@ to read, not as a final score.{f" {failed} conversation(s) could not be analysed
 <div class="cols">
   <div><h2>Overall sentiment</h2>{_bar_rows(sentiment, SENTIMENTS, total)}</div>
   <div><h2>Mood from start to end</h2>{_bar_rows(trend, TRENDS, total)}</div>
-  <div><h2>Admission interest</h2>{_bar_rows(interest, INTEREST_LEVELS, total)}</div>
-  <div><h2>Topics raised</h2>{_bar_rows(topics, None, total)}</div>
+  <div><h2>Admission interest</h2>{_bar_rows(interest, INTEREST_LEVELS, total, 'interest')}</div>
+  <div><h2>Topics raised</h2>{_bar_rows(topics, None, total, 'topic')}</div>
   <div><h2>Channel and language</h2>{_bar_rows(by_channel, None, total)}</div>
 </div>
 
 <h2>Questions the assistant could not answer <span class="muted">(all channels)</span></h2>
 {unanswered_html}
 
-<h2>Conversations <span class="muted">(frustrated and negative first)</span></h2>
+<h2 id="convs">Conversations <span class="muted">(frustrated and negative first)</span></h2>
+<p id="filterNote" class="note" hidden><span id="filterText"></span> <button id="filterClear" type="button">Show all</button></p>
 <div class="scroll"><table>
-<tr><th>Date</th><th>Channel</th><th>Sentiment</th><th>Mood</th><th>Admission interest</th>
+<tr><th>Date</th><th>Channel</th><th>Sentiment</th><th>Mood</th><th>Admission interest</th><th>Topics</th>
 <th>Frustration</th><th>Summary</th><th>Session</th></tr>
 {table_rows}
 </table></div>
+<script>
+(function () {{
+  var rows = document.querySelectorAll('.scroll tbody tr[data-interest], .scroll tr[data-interest]');
+  var note = document.getElementById('filterNote'), text = document.getElementById('filterText');
+  var bars = document.querySelectorAll('.bar.click');
+  function clear() {{
+    rows.forEach(function (r) {{ r.hidden = false; }});
+    bars.forEach(function (b) {{ b.classList.remove('active'); }});
+    note.hidden = true;
+  }}
+  function pick(bar) {{
+    var kind = bar.dataset.kind, key = bar.dataset.key, n = 0;
+    if (bar.classList.contains('active')) {{ clear(); return; }}
+    rows.forEach(function (r) {{
+      var ok = kind === 'interest' ? r.dataset.interest === key : (' ' + r.dataset.topics + ' ').indexOf(' ' + key + ' ') >= 0;
+      r.hidden = !ok; if (ok) n++;
+    }});
+    bars.forEach(function (b) {{ b.classList.toggle('active', b === bar); }});
+    text.textContent = 'Showing ' + n + ' conversation' + (n === 1 ? '' : 's') + ' with ' +
+      (kind === 'interest' ? key + ' admission interest' : 'topic "' + key + '"') + '.';
+    note.hidden = false;
+    document.getElementById('convs').scrollIntoView({{behavior: 'smooth'}});
+  }}
+  bars.forEach(function (b) {{
+    b.addEventListener('click', function () {{ pick(b); }});
+    b.addEventListener('keydown', function (e) {{ if (e.key === 'Enter' || e.key === ' ') {{ e.preventDefault(); pick(b); }} }});
+  }});
+  document.getElementById('filterClear').addEventListener('click', clear);
+}})();
+</script>
 </body></html>"""
     html_path.write_text(page, encoding="utf-8")
     return html_path, csv_path
@@ -538,14 +576,16 @@ async def analyse_folder(folder: Path) -> dict | None:
     return await _analyse(client, conv, asyncio.Semaphore(1))
 
 
-def cached_result(folder: Path) -> dict | None:
-    """The judgement cached beside a phone call by the current phone prompt, if any (a phone
-    call judged before phone calls had their own prompt does not count)."""
+def cached_result(folder: Path, website: bool = False) -> dict | None:
+    """The judgement cached beside a conversation by the current prompt, if any. Phone calls
+    use the phone prompt (a call judged before it existed does not count); website=True reads
+    the website prompt's result instead."""
     try:
         cached = json.loads((Path(folder) / "sentiment.json").read_text(encoding="utf-8"))
     except Exception:
         return None
-    return cached["result"] if cached.get("prompt") == f"phone{PHONE_PROMPT_VERSION}" else None
+    wanted = f"website{PROMPT_VERSION}" if website else f"phone{PHONE_PROMPT_VERSION}"
+    return cached["result"] if cached.get("prompt") == wanted else None
 
 
 async def run_periodically(interval_hours: float, days: int = 7) -> None:
