@@ -54,3 +54,23 @@ def test_phone_numbers_and_codes_stay_as_digits():
     assert say("counselling code 1316") == "counselling code 1316"
     assert say("number 94450") == "number 94450"
     assert say("24/7 and the 1st year") == "24/7 and the 1st year"
+
+
+def test_agni_is_said_with_the_stress_on_ag():
+    assert say("Welcome to Agni College of Technology, this is Agni AI.") == \
+        "Welcome to <<ˈ|ʌ|g|n|i>> College of Technology, this is <<ˈ|ʌ|g|n|i>> AI."
+    assert say("Agni-ல படிக்கலாம்") == "<<ˈ|ʌ|g|n|i>>-ல படிக்கலாம்"
+    assert say("Agnihotri") == "Agnihotri"          # a longer word is left alone
+
+
+def test_words_built_on_agni():
+    assert say("Agnians from Mechanical won.") == "<<ˈ|ʌ|g|n|i|ə|n|z>> from Mechanical won."
+    assert say("Agnifest'26, Agniverse and the AGNIHACKATHON") == \
+        "<<ˈ|ʌ|g|n|i>> Fest'twenty-six, <<ˈ|ʌ|g|n|i>> Verse and the <<ˈ|ʌ|g|n|i>> Hackathon"
+
+
+def test_agnishwar_and_garuda_depend_on_the_sentence_language():
+    assert say("Our Vice Chairman is Mr. Agnishwar Jayaprakash, the founder of Garuda Aerospace.") == \
+        "Our Vice Chairman is Mr. <<ˈ|a|g|n|i|ʃ|w|ə|r>> Jayaprakash, the founder of <<ˈ|g|a|r|u|d|ɑː>> Aerospace."
+    assert say("எங்க Vice Chairman Mr. Agnishwar Jayaprakash, Garuda Aerospace-ஓட founder.") == \
+        "எங்க Vice Chairman Mr. <<ˈ|ʌ|g|n|i|ʃ|w|ə|r>> Jayaprakash, Garuda Aerospace-ஓட founder."

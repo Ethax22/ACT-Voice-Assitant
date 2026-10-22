@@ -53,6 +53,33 @@ PRONUNCIATIONS: dict[str, str] = {
     # Indus pronunciation entry: Thalambur -> தாழம்பூர். In an English sentence the voice
     # needs Latin letters, so this is a respelling (not yet judged by ear).
     "Thalambur": "Thaazhampoor",
+    # The college's name: stress on the first syllable, short "a" as in "up" (Prakash picked
+    # option H of 10 by ear, 2026-10-22; the voice said "Ag-NEE"). Cartesia reads <<...>> as IPA.
+    "Agni": "<<ˈ|ʌ|g|n|i>>",
+    "AGNI": "<<ˈ|ʌ|g|n|i>>",
+    # Words built on the name, picked by ear on 2026-10-22: the students (option C) and the
+    # event names split as "Agni ..." with the same Agni (option B; the capitals of
+    # AGNIHACKATHON were otherwise at risk of being spelled out).
+    "Agnians": "<<ˈ|ʌ|g|n|i|ə|n|z>>",
+    "Agnian": "<<ˈ|ʌ|g|n|i|ə|n>>",
+    "Agnifest": "<<ˈ|ʌ|g|n|i>> Fest",
+    "Agniverse": "<<ˈ|ʌ|g|n|i>> Verse",
+    "AGNIHACKATHON": "<<ˈ|ʌ|g|n|i>> Hackathon",
+}
+
+# Words that need a different spelling in a Tamil sentence than in an English one, picked by ear on
+# 2026-10-22/23. The voice turned the "u as in up" vowel into the right அ in Tamil but into "Ugh" in
+# English ("Ugnishwar"), so English uses an open "a" as in "father" (round 2, option 1), and
+# "Garuda" was right in Tamil as written but wrong in English. A sentence with Tamil letters in it
+# counts as Tamil (the filter sees text, not the call's language).
+BY_LANGUAGE: dict[str, dict[str, str]] = {
+    "ta": {"Agnishwar": "<<ˈ|ʌ|g|n|i|ʃ|w|ə|r>>"},
+    "en": {"Agnishwar": "<<ˈ|a|g|n|i|ʃ|w|ə|r>>", "Garuda": "<<ˈ|g|a|r|u|d|ɑː>>"},
+}
+_TAMIL_LETTERS = re.compile(r"[\u0B80-\u0BFF]")
+_BY_LANGUAGE_RE = {
+    lang: re.compile(r"(?<![\w.])(" + "|".join(re.escape(k) for k in sorted(words, key=len, reverse=True)) + r")(?!\w)")
+    for lang, words in BY_LANGUAGE.items()
 }
 
 _PRONUNCIATION_RE = re.compile(
@@ -155,10 +182,18 @@ async def to_speech(text: str, aggregation_type=None) -> str:
     saved transcript and in the history sent back to the LLM (seen in
     2026-10-07 test transcripts). A transform only changes what is sent to
     the voice."""
+    return speech_text(text)
+
+
+def speech_text(text: str) -> str:
+    """What to_speech sends to the voice, callable without await (greeting_cache keys its clips
+    on it, so a pronunciation change re-records the greetings)."""
     text = _MARKDOWN.sub(" ", text)
     text = _URL_SCHEME.sub("", text)
     ended_with_period = text.rstrip().endswith(".")
     text = _PRONUNCIATION_RE.sub(lambda m: PRONUNCIATIONS[m.group(1)], text)
+    lang = "ta" if _TAMIL_LETTERS.search(text) else "en"
+    text = _BY_LANGUAGE_RE[lang].sub(lambda m: BY_LANGUAGE[lang][m.group(1)], text)
     if ended_with_period and not text.rstrip().endswith("."):
         text = text.rstrip() + "."  # "...and M.E." ends the sentence: the entry for "M.E." swallowed its dot
     text = _EXAM_NUMBERED.sub(r"Internal Assessment Test \1", text)

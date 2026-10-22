@@ -76,8 +76,12 @@ class GreetingPlayer(FrameProcessor):
 def _cache_key(language: str, text: str) -> str:
     from pipeline import CARTESIA_MODEL, CARTESIA_VOICE_ID, cartesia_generation_settings
 
+    from speech_text_filter import speech_text
+
     settings = ",".join(f"{k}={v}" for k, v in sorted(cartesia_generation_settings().items()))
-    return "|".join(["cartesia", CARTESIA_MODEL, CARTESIA_VOICE_ID or "", settings, language, text])
+    # The text as the voice receives it, so a change to the pronunciations re-records the clip
+    # (keyed on the written text, the old "Agni" greeting would have kept playing).
+    return "|".join(["cartesia", CARTESIA_MODEL, CARTESIA_VOICE_ID or "", settings, language, speech_text(text)])
 
 
 def cache_path(language: str, text: str) -> Path:
