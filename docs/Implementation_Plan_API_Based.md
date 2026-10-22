@@ -41,6 +41,7 @@ copy-paste-final code.
 | Reply styles + mid-call language switch (reworked 2026-10-09) | 🟡 `voice-pipeline/conversation_router.py` no longer waits for language detection (it was up to 2.5 s on the first turn), classifies each turn locally as EN / TA / TA_EN (`style_classifier.py`, Tamil + English mixed in English letters), and keeps ONE voice (About Us) for the whole call — topic only lights the browser tile. Tamil/Tanglish prompts rewritten (`main.py` `LANGUAGE_RULES`, `TAMIL_STYLE`, `TANGLISH_STYLE`). Checked with synthesized speech only: results in `docs/Zimi_P0_Validation.md`; **no real-ear listening test yet**, Tanglish word list and prompts unreviewed by a native speaker. |
 | Voice latency work | 🟡 `voice-pipeline/latency_metrics.py` logs per-turn `[latency]` lines (STT/LLM/TTS first byte, user-stopped → bot-audio). Backend first word measured ≈ 1.7 s over HTTP (retrieval ≈ 0.3–0.45 s, Sarvam 105B first token ≈ 0.4 s); a retrieval-query cache was added. **No real voice-call numbers yet** — tuning of VAD silence, TTS buffers and answer length waits on them (see `docs/Session_Handoff_ERP_CallAgent_VoiceLatency.md` §6). |
 | Calling Agent (separate product, not built in this repo) | 🟡 **Moved off Sarvam Indus to our own pipeline** (approved 2026-10-18; plan: `docs/Calling_Agent_DIY_Implementation_Plan.md`; code in the separate `ACT-Calling-Agent` repo: `phone-agent`, `erp-lookup`). It reuses this repo's `voice-pipeline` (through `PipelineProfile`) and `rag-backend` (phone and outbound prompts, client tools). Built and tested in the browser and on the Azure test server: inbound answers, records with ID checks, transfer (simulated), post-call record, outbound agent, campaigns that ring the browser, Agent Analytics, sentiment. **Not started:** the real phone line (Phase 5: Vobiz number, `/vobiz` routes, real transfer), the trial and switch-over (Phase 6), real outbound dialling (needs DLT and consent). Indus still answers the college's calls until the switch-over. |
+| Public-traffic limits (added 2026-10-22) | ✅ Built and checked live on test copies of both services. Typed chat (`rag-backend/public_limits.py`): 20 messages a minute and 300 an hour per visitor address, newest message at most 1000 characters (the widget box stops at 1000 too), at most the last 60 messages sent to the model. Website voice (`voice-pipeline/web_call_limits.py`): 4 calls at once in all (leaves one Cartesia voice of the plan's 5 for the phone line), 2 at once and 30 an hour per address, "are you still there?" after 45 s of silence and a goodbye after 45 s more, 15-minute cap, `/detect-language` uploads at most about 8 s of audio. The widget lets the last words finish before closing and says why a call ended or was refused. Every limit is an environment setting, 0 = off. The visitor address is the last `X-Forwarded-For` entry (nginx). Counts are in memory per service. The new Tamil nudge and goodbye lines are not yet reviewed by a native speaker. |
 | Deployment | 🟡 Test deployment done 2026-10-21 on an Azure VM (Central India, `agni-agent.centralindia.cloudapp.azure.com`): `rag-backend`, `voice-pipeline`, the widget at `/`, and the Calling Agent's services, behind nginx with HTTPS (Let's Encrypt) and one password on the whole site. Steps: `ACT-Calling-Agent/deploy/AZURE.md`. Checked by Prakash in the browser: typed chat and voice work. **Not done:** launch hosting on the college's own server (the VM is for testing only), and a widget served without the password for real visitors. |
 
 Do not re-litigate anything marked ✅ or the historical bug fixes logged in
@@ -210,8 +211,8 @@ each:
   (in `widget/index.html`'s `startVoiceSession`), so the visitor doesn't have
   to repeat whatever they said during detection.
 - *(Updated 2026-10-08)* The manual EN/Tamil override was removed from the
-  widget with the English-only wording change; there is currently no manual
-  override (CLAUDE.md decision #5 asks for one — flag to Prakash before launch).
+  widget with the English-only wording change. **Decided 2026-10-22 (Prakash):
+  no manual switch** — CLAUDE.md decision #5 no longer asks for one.
 - **Mid-call switching** lives in `voice-pipeline/conversation_router.py`: a
   background batch detection per utterance (≥1 s), a Tamil-script shortcut, and
   spoken phrases ("speak Tamil"); needs 0.7 confidence. See
@@ -382,6 +383,10 @@ post-conversation job — nothing is scored during a call.
 
 ## 12. Phase 11 — Consistency QA
 
+**Done by Prakash, 2026-10-22:** typed chat, English voice and Tamil voice answered
+consistently in his own test; he also reviewed the Tamil lines (spoken clearly) and
+checked the BE/ME fix by ear. His results are not written up as a question-by-question table.
+
 - Run the same ~20–30 question test set (from the PRD) through typed chat,
   English voice, and Tamil voice; confirm substance matches — the real proof
   the shared-brain architecture works, especially important now that the LLM
@@ -414,8 +419,8 @@ post-conversation job — nothing is scored during a call.
 
 - [ ] LLM and listening run on Sarvam, speaking on Cartesia (2026-10-18); no Azure chat/Deepgram code or keys remain
 - [ ] Visitor can type a question and get an answer from the RAG backend
-- [ ] Visitor gets a full spoken conversation in either language, auto-detected,
-      with a manual override available
+- [ ] Visitor gets a full spoken conversation in either language, auto-detected
+      (no manual switch, decided 2026-10-22)
 - [ ] Both languages and typed chat answer the same test-question set consistently
 - [ ] Voice launches on a Cartesia library voice (a staff clone is a fast-follow, not a launch gate — see Phase 7)
 - [ ] Admission-intent visitors get captured as structured leads in Google Sheets

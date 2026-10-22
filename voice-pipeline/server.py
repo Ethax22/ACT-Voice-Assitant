@@ -16,12 +16,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pipecat.pipeline.runner import PipelineRunner
 
 from conversation_logger import prune_old_logs
 from language_detection import detect_language
-from pipeline import build_pipeline
+from pipeline import PipelineProfile, build_pipeline
+import web_call_limits
 
 app = FastAPI(title="Agni AI Voice Pipeline")
 
@@ -73,10 +75,23 @@ async def _run_voice_session(websocket: WebSocket, language: str):
         return
 
     await websocket.accept()
-    session_id = uuid.uuid4().hex
-    worker = build_pipeline(websocket, language=language, session_id=session_id)
-    runner = PipelineRunner()
-    await runner.run(worker)
+    # Public limits (web_call_limits.py): too many calls at once, or from one visitor.
+    address = web_call_limits.client_address(websocket.headers, websocket.client.host if websocket.client else None)
+    refused = web_call_limits.gate.enter(address)
+    if refused:
+        await websocket.close(code=web_call_limits.BUSY_CODE, reason=refused)
+        return
+    try:
+        session_id = uuid.uuid4().hex
+        limits = web_call_limits.WebCallLimits()
+        # Website values everywhere else (PipelineProfile's defaults); only the silence
+        # timer and the hook for the nudge, goodbye and time cap are added.
+        profile = PipelineProfile(user_idle_timeout=limits.idle_secs, on_built=limits.attach)
+        worker = build_pipeline(websocket, language=language, session_id=session_id, profile=profile)
+        runner = PipelineRunner()
+        await runner.run(worker)
+    finally:
+        web_call_limits.gate.leave(address)
 
 
 @app.websocket("/voice/en")
@@ -101,6 +116,8 @@ async def detect_language_route(request: Request):
     encoding step is needed on either side.
     """
     pcm16_audio = await request.body()
+    if web_call_limits.DETECT_LANGUAGE_MAX_BYTES and len(pcm16_audio) > web_call_limits.DETECT_LANGUAGE_MAX_BYTES:
+        return JSONResponse({"detail": "audio_too_long"}, status_code=413)
     language = await detect_language(pcm16_audio)
     return {"language": language}
 

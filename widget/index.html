@@ -555,7 +555,7 @@
 
     <div class="input-bar">
       <form class="chat-row" id="chatForm">
-        <input type="text" id="chatInput" placeholder="Or send a message..." autocomplete="off" aria-label="Type your question">
+        <input type="text" id="chatInput" placeholder="Or send a message..." autocomplete="off" aria-label="Type your question" maxlength="1000">
         <button type="submit" class="send-btn" id="sendBtn" aria-label="Send">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.5 20.5 22 12 2.5 3.5l.01 6.6L16 12 2.51 13.9z"/></svg>
         </button>
@@ -745,6 +745,16 @@
         body: JSON.stringify({ messages: conversationHistory, session_id: chatSessionId }),
       });
 
+      if (res.status === 429 || res.status === 413) {
+        // The backend's public limits (rag-backend/public_limits.py): say so plainly
+        // instead of "trouble connecting", and keep the refused message out of the history.
+        conversationHistory.pop();
+        addBubble(res.status === 429
+          ? "You're sending messages a little fast. Please wait a minute and try again."
+          : "That message is too long. Please shorten it and send it again.", 'assistant');
+        statusLine.textContent = '';
+        return;
+      }
       if (!res.ok) throw new Error(`Backend returned ${res.status}`);
 
       const data = await res.json();
@@ -1280,8 +1290,26 @@
       statusLine.textContent = 'Voice connection error. Please try again.';
     };
 
-    voiceWs.onclose = () => {
-      stopVoiceSession();
+    voiceWs.onclose = (event) => {
+      const closedWs = event.target;
+      // The visitor ended it (stopVoiceSession already cleared voiceWs), or an older call.
+      if (closedWs !== voiceWs) return;
+      // The server ended the call (voice-pipeline/web_call_limits.py): let its last words, such
+      // as the goodbye, finish playing before shutting down, then say why it ended.
+      const remaining = playbackCtx ? Math.max(0, nextPlayTime - playbackCtx.currentTime) : 0;
+      let note = '';
+      if (event.code === 4429) {
+        note = event.reason === 'busy'
+          ? 'Voice chat is busy right now. Please try again in a minute, or type your question.'
+          : 'Too many voice chats from this device. Please try again later, or type your question.';
+      } else if (remaining > 0) {
+        note = 'Voice chat ended.';
+      }
+      setTimeout(() => {
+        if (voiceWs !== closedWs) return;  // the visitor already stopped or restarted
+        stopVoiceSession();
+        if (note) statusLine.textContent = note;
+      }, remaining * 1000 + 300);
     };
   }
 

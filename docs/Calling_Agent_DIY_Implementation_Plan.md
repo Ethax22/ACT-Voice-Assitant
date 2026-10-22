@@ -224,6 +224,8 @@ Local test guide: `C:\ACT-Calling-Agent\LOCAL_TEST.md`; start everything with `s
 
 ### Phase 5: Connect the real line (P+C, ~3 to 5 days)
 
+**Timing (decided 2026-10-22, Prakash):** Phase 5 starts only after the presentation to the college (2026-10-23). Until then the agent stays on the browser test line and the Azure test server. Prakash's checks before the presentation: typed chat, English and Tamil voice, the inbound and outbound agents in the browser, interruptions and turn-taking, transfer (simulated), tools, the Tamil lines, sentiment labels against his own labels, and BE/ME: all reported working. Launch hosting will be the college's server; the Azure VM stays a test server.
+
 | # | Task | Check |
 |---|---|---|
 | 5.1 | Point the Vobiz number's answer URL at `https://<azure>/vobiz/answer`; `<Stream>` to `/vobiz/ws` | A real call reaches the server and the log shows the caller's number |

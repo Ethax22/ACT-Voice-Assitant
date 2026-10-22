@@ -44,6 +44,7 @@ from spoken_numbers import normalize_spoken_numbers
 from retriever import retriever
 from leads import normalize_indian_mobile, save_lead
 from conversation_logger import log_turn, prune_old_logs
+import public_limits
 from conversation_state import derive_state, lead_already_captured, mark_lead_captured
 from sentiment_report import run_periodically as run_sentiment_reports
 
@@ -1490,15 +1491,20 @@ class WidgetChatRequest(BaseModel):
 
 
 @app.post("/widget/chat")
-async def widget_chat(payload: WidgetChatRequest):
+async def widget_chat(payload: WidgetChatRequest, request: Request):
     """Public-facing proxy for the browser widget. No vendor key or backend
     auth key is ever sent to or held by the browser — this route holds them
-    server-side and returns just the reply text."""
+    server-side and returns just the reply text. Rate and size limits:
+    public_limits.py."""
     if not payload.messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
+    if not public_limits.widget_chat_limiter.allow(public_limits.request_address(request)):
+        raise HTTPException(status_code=429, detail="rate_limited")
+    if public_limits.too_long(payload.messages):
+        raise HTTPException(status_code=413, detail="message_too_long")
 
     response = await _generate_reply(
-        payload.messages, source="chat", session_id=payload.session_id
+        public_limits.trim_history(payload.messages), source="chat", session_id=payload.session_id
     )
     reply = response.choices[0].message.content
     if payload.session_id:
