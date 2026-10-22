@@ -182,7 +182,10 @@ def test_phone_calls_forbid_bro_in_every_style_but_the_website_english_does_not(
 
 def test_a_register_number_is_not_forced_into_a_lead():
     reg = [{"role": "user", "content": "my register number is 312823104004"}]
-    assert main._should_force_lead_capture(reg, "t-force-1") is True          # a stranger's long number: still forced
+    # A stranger's 12-digit number is not a valid mobile: since 2026-10-22 nothing is forced (the
+    # model "fixed" such numbers); a wrong-length phone number gets "say it again" instead.
+    assert main._should_force_lead_capture(reg, "t-force-1") is False
+    assert main._invalid_lead_number(reg, None) is None                       # it is a register number
     assert main._should_force_lead_capture(reg, "t-force-2", "student") is False
     assert main._should_force_lead_capture(reg, "t-force-3", "faculty") is False
     asked = [{"role": "assistant", "content": "Please tell me the student's register number."}, *reg]
@@ -329,9 +332,10 @@ def test_phone_lead_is_read_back_before_it_is_saved_and_the_website_saves_at_onc
                 {"role": "user", "content": "yes that's right"}]
     assert main._should_force_lead_capture(readback, "t-lead-p2", None, confirm_first=True) is True
     assert main._phone_needs_readback(readback, "t-lead-p2", None) is False
-    # a wrong or short number is still handled by the existing invalid-number flow
+    # a wrong-length number (since 2026-10-22): nothing is forced or saved, the reply asks again
     bad = [{"role": "user", "content": "my number is 987654321"}]
-    assert main._should_force_lead_capture(bad, "t-lead-p3", None, confirm_first=True) is True
+    assert main._should_force_lead_capture(bad, "t-lead-p3", None, confirm_first=True) is False
+    assert main._invalid_lead_number(bad, None) == "987654321"
     # records callers and the register-number question are never leads
     assert main._phone_needs_readback(said, "t-lead-p4", "student") is False
 

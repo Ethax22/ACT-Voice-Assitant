@@ -47,7 +47,8 @@ PRONUNCIATIONS: dict[str, str] = {
     "Ph.D.": "PhD",
     "Ph.D": "PhD",
     "EEE": "triple E",
-    "AI&DS": "AI and DS",
+    "AI&DS": "AIDS",  # Prakash, 2026-10-22: said as one word, not "AI and DS"
+    "AI & DS": "AIDS",
     "HOD": "H O D",  # bare "HOD" was heard back as a word
     # Indus pronunciation entry: Thalambur -> தாழம்பூர். In an English sentence the voice
     # needs Latin letters, so this is a respelling (not yet judged by ear).

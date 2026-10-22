@@ -69,6 +69,14 @@ def _origin_allowed(websocket: WebSocket) -> bool:
     return websocket.headers.get("origin", "") in WIDGET_ALLOWED_ORIGINS
 
 
+# Speech recognition language for website calls (2026-10-22). "auto": Sarvam works out each
+# sentence's language, as on the phone line, so a visitor who starts speaking Tamil is heard as
+# Tamil on that same turn. Locked to English (the old way), Tamil came out as a made-up English
+# sentence ("How to apply for citizenship?" for "சேர்க்கைக்கு எப்படி விண்ணப்பிப்பது?") and the
+# switch only came a turn later. WEB_STT_LANGUAGE=locked restores the old behaviour.
+WEB_STT_LANGUAGE = None if os.environ.get("WEB_STT_LANGUAGE", "auto").strip().lower() == "locked" else "auto"
+
+
 async def _run_voice_session(websocket: WebSocket, language: str):
     if not _origin_allowed(websocket):
         await websocket.close(code=4403)
@@ -86,7 +94,8 @@ async def _run_voice_session(websocket: WebSocket, language: str):
         limits = web_call_limits.WebCallLimits()
         # Website values everywhere else (PipelineProfile's defaults); only the silence
         # timer and the hook for the nudge, goodbye and time cap are added.
-        profile = PipelineProfile(user_idle_timeout=limits.idle_secs, on_built=limits.attach)
+        profile = PipelineProfile(user_idle_timeout=limits.idle_secs, on_built=limits.attach,
+                                  stt_language_code=WEB_STT_LANGUAGE)
         worker = build_pipeline(websocket, language=language, session_id=session_id, profile=profile)
         runner = PipelineRunner()
         await runner.run(worker)

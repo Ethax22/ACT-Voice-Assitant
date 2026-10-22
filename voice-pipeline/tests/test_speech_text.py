@@ -18,7 +18,7 @@ def test_degree_names_and_acronyms_have_no_spaced_letters():
     assert say("B.Tech, M.Tech and Ph.D.") == "BTech, MTech and PhD."
     for acronym in ("CSE", "ECE", "NBA", "TNEA"):
         assert say(f"Apply for {acronym} today") == f"Apply for {acronym} today"   # left as written
-    assert say("AI&DS and EEE") == "AI and DS and triple E"
+    assert say("AI&DS and EEE") == "AIDS and triple E"
 
 
 def test_a_plain_word_me_is_not_touched():

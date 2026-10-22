@@ -157,10 +157,13 @@ Rules:
   out loud, not as a hyphenated block — e.g. "oh four four, six seven four,
   zero nine four four, four four" rather than "044-6740944". Hyphens get read
   digit-by-digit in an unnatural, robotic way.
-- If a visitor shows clear admission interest (asks about applying, fees,
-  eligibility, "how do I join", wants a callback, etc.), warmly ask for their
-  name and phone number so admissions can follow up — and their preferred
-  course and email if the conversation naturally allows it. Ask
+- If a visitor shows admission interest — asks about applying or the admission
+  process, fees, eligibility or "how do I join", says they are interested in a
+  course or department, wants more details about one, or wants a callback —
+  answer, then at the end of that same reply warmly ask for their name and
+  phone number so the admissions team can follow up (and their preferred
+  course and email if it fits naturally). Ask once; if they don't give them
+  or say no, don't ask again unless they bring it up. Ask
   conversationally, one or two details at a time, not as a form. Once you
   have at least a name and phone number, call the capture_lead tool with
   whatever fields you've collected — don't wait to have all four. Never call
@@ -327,9 +330,76 @@ def _should_force_lead_capture(
     if not match:
         return False
     phone = normalize_indian_mobile(match.group(0))
-    if confirm_first and phone:
+    if not phone:
+        # Wrong number of digits (usually misheard): nothing to save. The reply asks again
+        # (_invalid_lead_number); forcing the tool here let the model "fix" the number itself.
+        return False
+    if confirm_first:
         return False  # a valid number: read it back before saving
-    return not (phone and lead_already_captured(session_id, phone))
+    return not lead_already_captured(session_id, phone)
+
+
+def _invalid_lead_number(messages: list[dict], caller_role: str | None) -> str | None:
+    """The digits of a phone number the visitor just gave that is not a valid 10-digit mobile
+    (e.g. 9 digits when speech recognition dropped one), or None. Not on records or outbound calls,
+    and not right after the bot asked for a register number or date of birth."""
+    if caller_role in RECORDS_ROLES or caller_role == "lead":
+        return None
+    last_reply = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "assistant"), "")
+    if isinstance(last_reply, str) and _ASKED_FOR_RECORD_DETAIL.search(last_reply):
+        return None
+    latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+    latest = latest if isinstance(latest, str) else ""
+    match = _PHONE_RUN.search(normalize_spoken_numbers(latest))
+    if not match or normalize_indian_mobile(match.group(0)) or _REGISTER_WORDS.search(latest):
+        return None
+    # Only when the talk is about a phone number: the visitor says so, or the bot just asked for one.
+    if not (_PHONE_WORDS.search(latest) or (isinstance(last_reply, str) and _PHONE_WORDS.search(last_reply))):
+        return None
+    return re.sub(r"\D", "", match.group(0))
+
+
+_PHONE_WORDS = re.compile(r"phone|mobile|number|contact|digits|நம்பர்|போன்|ஃபோன்|மொபைல்|எண்", re.I)
+_REGISTER_WORDS = re.compile(r"register|reg\.? ?no|ரெஜிஸ்டர்|பதிவு எண்", re.I)
+
+
+# Admission interest in the visitor's own words (English, Tamil, Tanglish). On 2026-10-22 the prompt
+# alone left "I'm really interested in CSE" without the ask in 2 of 2 tries: the model asked about the
+# course instead. Code adds the ask once (_lead_ask_final); it is not added after it has been asked.
+_INTEREST = re.compile(
+    r"\binterest(?:ed)?\b|\bwant to (?:join|apply|study)\b|\bapply\b|\badmission|\bhow (?:do|can) i join\b|"
+    r"\bcall ?back\b|இன்ட்ரெஸ்ட்|இண்ட்ரஸ்ட்|ஆர்வம்|சேரணும்|சேர விரும்பு|அப்ளை|அட்மிஷன்|"
+    r"\b(?:join|apply|admission)\s*panna", re.I)
+_NO_INTEREST = re.compile(r"not interested|no interest|interest illa|ஆர்வம் இல்லை|இன்ட்ரெஸ்ட் இல்ல", re.I)
+_ASKED_FOR_DETAILS = re.compile(r"phone number|mobile number|your name|உங்க (?:பேரு|பெயர்)|உங்கள் பெயர்|போன் நம்பர்|ஃபோன் நம்பர்", re.I)
+LEAD_ASK_FINAL = (
+    " The visitor has shown admission interest and has not been asked for their details yet: answer, then end "
+    "this reply with one short friendly sentence asking for their name and phone number so the admissions team "
+    "can follow up. Ask nothing else in this reply."
+)
+
+
+def _should_ask_for_lead(messages: list[dict], session_id: str | None, caller_role: str | None) -> bool:
+    """The visitor's latest message shows admission interest, no number has been given, and the bot
+    has not asked for their details yet in this conversation."""
+    if caller_role in RECORDS_ROLES or caller_role == "lead":
+        return False
+    latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+    if not isinstance(latest, str) or not _INTEREST.search(latest) or _NO_INTEREST.search(latest):
+        return False
+    if _PHONE_RUN.search(normalize_spoken_numbers(latest)):
+        return False
+    return not any(m.get("role") == "assistant" and isinstance(m.get("content"), str)
+                   and _ASKED_FOR_DETAILS.search(m["content"]) for m in messages)
+
+
+def _invalid_number_final(digits: str) -> str:
+    return (
+        f" The visitor just gave a phone number, but it has {len(digits)} digits instead of 10, so it was "
+        "misheard and NOTHING was saved. Do not say it was noted, recorded or saved, and do not guess the "
+        "missing digit. In one short friendly sentence, in the visitor's language, say you may have misheard "
+        "and ask them to say all ten digits again, slowly."
+    )
 
 
 _DIGIT_WORDS = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4",
@@ -376,6 +446,32 @@ def _phone_needs_readback(messages: list[dict], session_id: str | None, caller_r
 _WANTS_PERSON = re.compile(
     r"\b(talk|speak|connect|transfer)\b.{0,25}\b(person|human|someone|somebody|staff|agent|representative|"
     r"reception|admissions?|placement|office|team)\b|\b(real|live) person\b|\bhuman\b", re.I)
+# The same request in Tamil or Tanglish (2026-10-22: "அட்மிஷனுக்கு டிரான்ஸ்ஃபர் பண்ண முடியுமா?" was not
+# recognised, so the model said it would transfer and never called transfer_call).
+_WANTS_PERSON_TA = re.compile(
+    r"டிரான்ஸ்ஃபர்|ட்ரான்ஸ்ஃபர்|டிரான்ஸ்பர்|ட்ரான்ஸ்பர்|கனெக்ட்|இணைச்சு|இணைச்சி|இணைக்க|இணைத்து|"
+    r"(?:ஆள்|ஆளு|யாராவது|யாரையாவது|ஸ்டாஃப்|ஸ்டாப்|அட்மிஷன்|ரிசப்ஷன்|ரிசெப்ஷன்|பிளேஸ்மென்ட்|பிளேஸ்மெண்ட்|"
+    r"ஆபீஸ்|ஆஃபீஸ்|டீம்)\S*\s*(?:கிட்ட|கூட|உடன்)\s*பேச|"
+    r"\b(?:transfer|connect)\s+(?:pannunga|pannu|panna|pannidunga|pannuveengala|panreengala|pannuveenga)\b|"
+    r"\b(?:kitta|kooda)\s+pesa", re.I)
+# "Transfer certificate" (TC) is a document, not a call transfer.
+_TRANSFER_CERTIFICATE = re.compile(r"certificate|சர்டிபிகேட்|சர்டிஃபிகேட்|சான்றிதழ்|\bTC\b", re.I)
+# The caller asks to end the call ("ஓகே கால் வச்சிருங்க" got "connecting you to admissions" on 2026-10-22).
+_WANTS_HANG_UP = re.compile(
+    r"\bhang ?up\b|\bend (?:the|this) call\b|\bcut the call\b|\bdisconnect\b|"
+    r"வச்சிரு|வச்சிடு|வச்சுடு|வச்சுரு|வைச்சிடு|வைச்சிரு|வெச்சிடு|வெச்சிரு|வையுங்க|கட் பண்ணு|கால் கட்|"
+    r"\b(?:call|phone)\s+(?:vachiru|vachidu|vachudu|vechidu|vaiyunga|cut)|\bvachirunga\b|\bvachidunga\b|"
+    r"\bcut\s+pannu", re.I)
+
+
+def _wants_person(text: str) -> bool:
+    """The caller asks to speak to a person or be transferred (English, Tamil or Tanglish)."""
+    return bool((_WANTS_PERSON.search(text) or _WANTS_PERSON_TA.search(text))
+                and not _TRANSFER_CERTIFICATE.search(text))
+
+
+def _wants_hang_up(text: str) -> bool:
+    return bool(_WANTS_HANG_UP.search(text)) and not _wants_person(text)
 _TAMIL_MONTHS = "ஜனவரி|பிப்ரவரி|மார்ச்|ஏப்ரல்|மே|ஜூன்|ஜூலை|ஆகஸ்ட்|செப்டம்பர்|அக்டோபர்|நவம்பர்|டிசம்பர்"
 _DATE_LIKE = re.compile(
     r"january|february|march|april|may|june|july|august|september|october|november|december|" + _TAMIL_MONTHS
@@ -418,7 +514,7 @@ def _answers_a_dob_question(last_reply: str, latest: str) -> bool:
 
 
 _YES = re.compile(r"^\W*(yes|yeah|yep|sure|ok|okay|please|haan|aama|sari|seri|ஆமா|ஆம்|சரி)(?:\W|$)", re.I)
-_TRANSFER_OFFERED = re.compile(r"transfer|connect you|connect your call", re.I)
+_TRANSFER_OFFERED = re.compile(r"transfer|connect you|connect your call|கனெக்ட்|இணைக்க|இணைச்சு", re.I)
 # A faculty ID read back character by character ("F A C 1 0 0 1"): three or more single letters
 # or digits in a row, separated by spaces. Language-independent, unlike the words around it.
 _READBACK = re.compile(r"(?<!\S)(?:[A-Za-z0-9][\s,.-]+){2,}[A-Za-z0-9](?!\S)")
@@ -490,7 +586,7 @@ def _outbound_forced(messages: list[dict], names: set, latest: str) -> str | Non
     if "leave_voicemail" in names and _VOICEMAIL.search(latest):
         return "leave_voicemail"
     if "end_call" in names and (_DO_NOT_CALL.search(latest) or _WRONG_NUMBER.search(latest)) \
-            and not _WANTS_PERSON.search(latest):
+            and not _wants_person(latest):
         return "end_call"
     return None
 
@@ -513,7 +609,7 @@ def _asks_for_more_class_data(messages: list[dict], latest: str) -> bool:
     """After the faculty ID is accepted, a new request for class attendance or marks. On a real call
     (2026-10-21) the model told a verified faculty member that marks for their second class had to
     come from the reception, then transferred them; the lookup was never called."""
-    return _faculty_verified(messages) and bool(_CLASS_DATA_ASKED.search(latest)) and not _WANTS_PERSON.search(latest)
+    return _faculty_verified(messages) and bool(_CLASS_DATA_ASKED.search(latest)) and not _wants_person(latest)
 
 
 def _answers_a_class_list(messages: list[dict], latest: str) -> bool:
@@ -538,6 +634,8 @@ def _forced_tool_choice(
     in the three cases where the turn can only be one thing, as with capture_lead."""
     if _should_force_lead_capture(messages, session_id, caller_role, confirm_first=phone):
         return {"tool_choice": FORCE_CAPTURE_LEAD}
+    if _invalid_lead_number(messages, caller_role):
+        return {"tool_choice": "none"}  # this reply only asks for the number again
     names = {(t.get("function") or {}).get("name") for t in client_tools or []}
     if phone and names and _faculty_needs_readback(messages, caller_role):
         return {"tool_choice": "none"}  # this turn only reads the faculty ID back (FACULTY_READBACK_FINAL)
@@ -564,12 +662,34 @@ def _forced_tool_choice(
             and (_confirms_faculty_readback(last_reply, latest) or _answers_a_class_list(messages, latest)
                  or _asks_for_more_class_data(messages, latest))):
         return force("get_class_summary")
+    if "end_call" in names and unanswered and _wants_hang_up(latest):
+        return force("end_call")
     if "transfer_call" in names and unanswered and (
-        _WANTS_PERSON.search(latest)
+        _wants_person(latest)
         or (len(latest.split()) <= 5 and _YES.search(latest) and _TRANSFER_OFFERED.search(last_reply))
     ):
         return force("transfer_call")
     return {}
+
+
+def _lead_phone(messages: list[dict], model_phone: str) -> str | None:
+    """The number to save for capture_lead. The visitor's own words win over the model's copy:
+    on 2026-10-22 the visitor said "7358011190" and the model passed "seven three five, eight
+    zero, one one nine zero" (a digit dropped), so a right number was refused. A wrong-length
+    number in the visitor's words saves nothing, even if the model "corrected" it."""
+    latest = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+    latest = latest if isinstance(latest, str) else ""
+    match = _PHONE_RUN.search(normalize_spoken_numbers(latest))
+    if match:
+        return normalize_indian_mobile(match.group(0))
+    model = normalize_indian_mobile(model_phone or "")
+    if model:
+        return model
+    # Phone calls save on the caller's "yes" to a read-back: the number is in the bot's last reply.
+    last_reply = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "assistant"), "")
+    if isinstance(last_reply, str) and len(latest.split()) <= 5 and _YES.search(latest):
+        return _spoken_phone(last_reply)
+    return None
 
 
 async def _resolve_tool_calls(
@@ -590,7 +710,7 @@ async def _resolve_tool_calls(
                 args = json.loads(function.get("arguments") or "{}")
             except json.JSONDecodeError:
                 args = {}
-            phone = normalize_indian_mobile(args.get("phone", ""))
+            phone = _lead_phone(messages, args.get("phone", ""))
             if phone is None:
                 logger.warning("capture_lead rejected invalid phone %r", args.get("phone"))
                 result = (
@@ -1247,8 +1367,12 @@ async def _build_full_messages(
             + (READBACK_FINAL if phone and _phone_needs_readback(
                 messages, session_id, (caller or {}).get("role")) else "")
             + (FACULTY_READBACK_FINAL if phone and _faculty_needs_readback(messages, (caller or {}).get("role")) else "")
+            + (_invalid_number_final(_invalid_lead_number(messages, (caller or {}).get("role")))
+               if _invalid_lead_number(messages, (caller or {}).get("role")) else "")
+            + (LEAD_ASK_FINAL if kind != "closing" and _should_ask_for_lead(
+                messages, session_id, (caller or {}).get("role")) else "")
             + (DO_NOT_CALL_FINAL if phone and (caller or {}).get("role") == "lead" and user_turns
-               and _DO_NOT_CALL.search(user_turns[-1]) and not _WANTS_PERSON.search(user_turns[-1])
+               and _DO_NOT_CALL.search(user_turns[-1]) and not _wants_person(user_turns[-1])
                else WRONG_NUMBER_FINAL if phone and (caller or {}).get("role") == "lead" and user_turns
                and _WRONG_NUMBER.search(user_turns[-1]) else "")
             + (ACK_FINAL if kind == "ack" else "")
