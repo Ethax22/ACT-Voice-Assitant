@@ -8,7 +8,7 @@ Every limit is read from the environment and 0 switches it off:
   Cartesia voice for the phone line.
 - VOICE_MAX_SESSIONS_PER_ADDRESS (2): calls at once from one visitor address.
 - VOICE_SESSIONS_PER_HOUR (30): calls one visitor address may start in an hour.
-- WEB_VOICE_IDLE_SECS (45): after this much silence from the visitor the bot asks if they are
+- WEB_VOICE_IDLE_SECS (20): after this much silence from the visitor the bot asks if they are
   still there; after the same again it says goodbye and ends the call.
 - WEB_VOICE_MAX_MINUTES (15): longest website voice call; then a goodbye and the call ends.
 - DETECT_LANGUAGE_MAX_BYTES (256000, about 8 s of audio): largest /detect-language upload.
@@ -39,7 +39,7 @@ def _env_float(name: str, default: float) -> float:
 MAX_SESSIONS = int(_env_float("VOICE_MAX_SESSIONS", 4))
 MAX_PER_ADDRESS = int(_env_float("VOICE_MAX_SESSIONS_PER_ADDRESS", 2))
 SESSIONS_PER_HOUR = int(_env_float("VOICE_SESSIONS_PER_HOUR", 30))
-IDLE_SECS = _env_float("WEB_VOICE_IDLE_SECS", 45)
+IDLE_SECS = _env_float("WEB_VOICE_IDLE_SECS", 20)
 MAX_MINUTES = _env_float("WEB_VOICE_MAX_MINUTES", 15)
 DETECT_LANGUAGE_MAX_BYTES = int(_env_float("DETECT_LANGUAGE_MAX_BYTES", 256000))
 BUSY_CODE = 4429
