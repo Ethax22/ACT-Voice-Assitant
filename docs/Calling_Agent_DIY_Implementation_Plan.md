@@ -155,7 +155,7 @@ Local test guide: `C:\ACT-Calling-Agent\LOCAL_TEST.md`; start everything with `s
 | End call | ✅ Done |
 | Language switching, starting English | ✅ Done (same router as the website); Tanglish and Tamil answers passed the scripted runs |
 | Let callers interrupt, eagerness, volume threshold | 🟡 Working; to be tuned on the real phone in Phase 5 (your ruling) |
-| Voice | 🟡 Same Cartesia voice as the website at its default speed (your ruling: defaults for now). **Not judged by ear** on the phone line |
+| Voice | ✅ Same voice as the website: since 2026-10-23 the Cartesia instant clone made from a Tamil recording (`1a7396f8…`), one voice for both languages, at its default speed. Judged by ear by Prakash on the browser test line; not yet on a real phone line (Phase 5). Set it in the VM's `.env` too |
 | Pronunciation dictionary | ✅ The one Indus entry (Thalambur, Tamil) is in as a Latin respelling, `Thaazhampoor`, for English sentences; Tamil sentences already use the Tamil script. **Not judged by ear** |
 | "Output numbers in Indic" | ✅ Decided 2026-10-20: dropped. Phone numbers (spaced digits in the prompt) and Tamil years (the text filter) are already handled; revisit only if a number is heard wrongly in Tamil |
 | Model temperature ("Compliant") | ✅ Phone answers use **0.3** (`PHONE_TEMPERATURE`); the website is unchanged |
